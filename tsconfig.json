@@ -47,6 +47,6 @@
     "declaration": false, /* Keep false for applications; only true if writing a reusable shared npm package */
     "skipLibCheck": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "test/index.test.ts"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
 }
