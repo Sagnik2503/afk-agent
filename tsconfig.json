@@ -1,5 +1,4 @@
 {
-  "$schema": "https://aka.ms",
   "compilerOptions": {
     /* Target & Environment */
     "target": "es2022", /* Standard for Node.js 18+ to leverage modern features without downleveling overhead */
