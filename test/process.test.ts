@@ -2,47 +2,29 @@ import { describe, it, expect } from "vitest";
 import { ChildProcess } from "../src/process";
 
 describe("ChildProcess", () => {
-    it("spawns the command and returns a running child", () => {
-        const child = ChildProcess("node", ["--version"]);
+    it("succeeds: resolves with stdout and exit code 0", async () => {
+        const result = await ChildProcess("node", ["-e", "console.log('ok')"]);
 
-        expect(child.pid).toBeTypeOf("number");
-        expect(child.exitCode).toBeNull();
-
-        child.kill();
+        expect(result.exitCode).toBe(0);
+        expect(result.signal).toBeNull();
+        expect(result.stdout).toContain("ok");
+        expect(result.stderr).toBe("");
     });
 
-    it("passes the args to the command and captures its output", async () => {
-        const child = ChildProcess("node", ["--version"]);
+    it("runs but exits with an error code", async () => {
+        const result = await ChildProcess("node", [
+            "-e",
+            "console.error('boom'); process.exit(3)",
+        ]);
 
-        const stdout = await new Promise<string>((resolve, reject) => {
-            let output = "";
-            child.stdout?.on("data", (chunk: string) => (output += chunk));
-            child.on("error", reject);
-            child.on("close", () => resolve(output.trim()));
-        });
-
-        expect(stdout).toMatch(/^v\d+\.\d+\.\d+/);
+        expect(result.exitCode).toBe(3);
+        expect(result.signal).toBeNull();
+        expect(result.stderr).toContain("boom");
     });
 
-    it("does not block while the process runs", () => {
-        const child = ChildProcess("node", ["-e", "setTimeout(() => {}, 5000)"]);
-
-        expect(child.exitCode).toBeNull();
-
-        child.kill();
-    });
-
-    it("wraps synchronous spawn failures", () => {
-        expect(() => ChildProcess(undefined as unknown as string, [])).toThrow(
-            /Failed to spawn/,
-        );
-    });
-
-    it("surfaces async errors when the command does not exist", async () => {
-        const child = ChildProcess("afk-agent-no-such-command", []);
-
+    it("cannot be started: rejects with the spawn error", async () => {
         await expect(
-            new Promise((_, reject) => child.on("error", reject)),
-        ).rejects.toThrow();
+            ChildProcess("afk-agent-no-such-command", []),
+        ).rejects.toMatchObject({ code: "ENOENT" });
     });
 });

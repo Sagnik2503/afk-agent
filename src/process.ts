@@ -1,9 +1,41 @@
-import {spawn, type ChildProcess as ChildProcessType} from "node:child_process"
+import {spawn} from "node:child_process"
 
-export function ChildProcess(command: string, args: string[]): ChildProcessType {
-    try {
-        return spawn(command, args)
-    } catch (error) {
-        throw new Error(`Failed to spawn "${command}"`, { cause: error })
-    }
+export type ProcessResult={
+    stdout: string,
+    stderr: string,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null;
 }
+export function ChildProcess(command: string, args: string[]): Promise<ProcessResult> {
+    
+    return new Promise((resolve,reject)=>{
+        const child = spawn(command, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        });
+
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout?.on('data',(data:Buffer)=>{
+            stdout+=data.toString()
+        })
+
+        child.stderr?.on("data", (data: Buffer) => {
+        stderr += data.toString();
+        });
+
+        child.on("error", (error) => {
+        reject(error);
+        });
+
+        child.on("close", (exitCode, signal) => {
+        resolve({
+            stdout,
+            stderr,
+            exitCode,
+            signal,
+            });
+        })
+    });
+}
+    
