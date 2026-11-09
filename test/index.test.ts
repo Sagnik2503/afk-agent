@@ -1,4 +1,4 @@
-import { getWelcomeMessage } from "../src/index"
+import { getWelcomeMessage } from "../src/index.js"
 import { describe, it, expect } from "vitest";
 
 describe("first test suit",()=>{

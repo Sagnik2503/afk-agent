@@ -6,10 +6,11 @@ export type ProcessResult={
     exitCode: number | null,
     signal: NodeJS.Signals | null;
 }
-export function ChildProcess(command: string, args: string[]): Promise<ProcessResult> {
+export function ChildProcess(command: string, args: string[], cwd?:string): Promise<ProcessResult> {
     
     return new Promise((resolve,reject)=>{
         const child = spawn(command, args, {
+        cwd,
         stdio: ["ignore", "pipe", "pipe"],
         });
 

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ChildProcess } from "../src/process";
+import { ChildProcess } from "../src/process.js";
+import { mkdtemp, rm, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execPath } from "node:process";
 
 describe("ChildProcess", () => {
     it("succeeds: resolves with stdout and exit code 0", async () => {
@@ -26,5 +30,22 @@ describe("ChildProcess", () => {
         await expect(
             ChildProcess("afk-agent-no-such-command", []),
         ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("runs the process in the specified directory", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "afk-agent-"));
+
+        try {
+            const result = await ChildProcess(
+            execPath,
+            ["-e", "console.log(process.cwd())"],
+            directory
+            );
+
+            expect(result.stdout.trim()).toBe(await realpath(directory));
+            expect(result.exitCode).toBe(0);
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
     });
 });
