@@ -2,7 +2,7 @@ import { ChildProcess } from "./process.js"
 
 //Example Implementation (Basic)
 
-// const result = await ChildProcess("touch", ["version.ts"]);
+// const result = await ChildProcess("touch", ["version.ts"],"./temp");
 // console.log(result.stdout)
 // console.log(result.stderr)
 // console.log(result.signal)

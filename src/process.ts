@@ -5,17 +5,31 @@ export type ProcessResult={
     stderr: string,
     exitCode: number | null,
     signal: NodeJS.Signals | null;
+    timedOut: boolean;
 }
-export function ChildProcess(command: string, args: string[], cwd?:string): Promise<ProcessResult> {
+
+export type ProcessOptions = {
+  cwd?: string;
+  timeout?: number;
+};
+
+export function ChildProcess(command: string, args: string[], options:ProcessOptions={}): Promise<ProcessResult> {
     
     return new Promise((resolve,reject)=>{
         const child = spawn(command, args, {
-        cwd,
-        stdio: ["ignore", "pipe", "pipe"],
+        cwd: options.cwd,
+        stdio: ["ignore", "pipe", "pipe"], //input, output, error
         });
 
+        let timedOut_flag=false
         let stdout = "";
         let stderr = "";
+
+        const timer=options.timeout?setTimeout(()=>{
+            timedOut_flag=true
+            child.kill("SIGTERM")
+
+        },options.timeout):undefined
 
         child.stdout?.on('data',(data:Buffer)=>{
             stdout+=data.toString()
@@ -30,13 +44,16 @@ export function ChildProcess(command: string, args: string[], cwd?:string): Prom
         });
 
         child.on("close", (exitCode, signal) => {
-        resolve({
-            stdout,
-            stderr,
-            exitCode,
-            signal,
+            if (timer) clearTimeout(timer);
+
+            resolve({
+                stdout,
+                stderr,
+                exitCode,
+                signal,
+                timedOut:timedOut_flag
             });
-        })
+        });
     });
 }
     

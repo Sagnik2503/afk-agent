@@ -39,7 +39,7 @@ describe("ChildProcess", () => {
             const result = await ChildProcess(
             execPath,
             ["-e", "console.log(process.cwd())"],
-            directory
+            {cwd:directory}
             );
 
             expect(result.stdout.trim()).toBe(await realpath(directory));
@@ -48,4 +48,26 @@ describe("ChildProcess", () => {
             await rm(directory, { recursive: true, force: true });
         }
     });
+
+    it("does not time out when the process finishes in time", async () => {
+        const result = await ChildProcess(
+            execPath,
+            ["-e", "console.log('Finished')"],
+            { timeout: 2000 }
+        );
+
+        expect(result.timedOut).toBe(false);
+        expect(result.exitCode).toBe(0);
+        });
+
+        it("terminates the process when the timeout is exceeded", async () => {
+        const result = await ChildProcess(
+            execPath,
+            ["-e", "setTimeout(() => console.log('Finished'), 5000)"],
+            { timeout: 1000 }
+        );
+
+        expect(result.timedOut).toBe(true);
+        expect(result.signal).toBe("SIGTERM");
+        });
 });
