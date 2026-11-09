@@ -70,4 +70,15 @@ describe("ChildProcess", () => {
         expect(result.timedOut).toBe(true);
         expect(result.signal).toBe("SIGTERM");
         });
+
+        it("force-kills a process that ignores SIGTERM for 5 seconds", async () => {
+        const result = await ChildProcess(
+            execPath,
+            ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
+            { timeout: 200 }
+        );
+
+        expect(result.timedOut).toBe(true);
+        expect(result.signal).toBe("SIGKILL");
+        }, 15000);
 });

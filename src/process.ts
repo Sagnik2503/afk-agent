@@ -25,6 +25,7 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         let timedOut_flag=false
         let stdout = "";
         let stderr = "";
+        let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
         const timer=options.timeout?setTimeout(()=>{
             timedOut_flag=true
@@ -35,6 +36,16 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
                 child.kill("SIGTERM");
               }
             }
+
+            //give 5 seconds and kill the process instead of graceful shutdown
+            forceKillTimer=setTimeout(()=>{
+                if(child.pid===undefined)return;
+                try{
+                    process.kill(-child.pid,"SIGKILL")
+                }catch {
+                    child.kill("SIGKILL");
+                }
+            },5000)
 
         },options.timeout):undefined
 
@@ -47,11 +58,14 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         });
 
         child.on("error", (error) => {
+        if (timer) clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         reject(error);
         });
 
         child.on("close", (exitCode, signal) => {
             if (timer) clearTimeout(timer);
+            if(forceKillTimer)clearTimeout(forceKillTimer)
 
             resolve({
                 stdout,
