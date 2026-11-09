@@ -19,6 +19,7 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         const child = spawn(command, args, {
         cwd: options.cwd,
         stdio: ["ignore", "pipe", "pipe"], //input, output, error
+        detached: true
         });
 
         let timedOut_flag=false
@@ -27,7 +28,13 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
 
         const timer=options.timeout?setTimeout(()=>{
             timedOut_flag=true
-            child.kill("SIGTERM")
+            if(child.pid!==undefined){
+                try{
+                    process.kill(-child.pid, "SIGTERM"); //process. targets the process grp whereas child. targets the child only
+                }catch {
+                child.kill("SIGTERM");
+              }
+            }
 
         },options.timeout):undefined
 
