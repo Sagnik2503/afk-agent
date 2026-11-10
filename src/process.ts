@@ -6,6 +6,7 @@ export type ProcessResult={
     exitCode: number | null,
     signal: NodeJS.Signals | null;
     timedOut: boolean;
+    outputTruncated: boolean
 }
 
 export type ProcessOptions = {
@@ -22,7 +23,7 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         stdio: ["ignore", "pipe", "pipe"], //input, output, error
         detached: true
         });
-
+        let outputTruncated=false
         let timedOut_flag=false
         let stdout = "";
         let stderr = "";
@@ -54,16 +55,29 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
 
         child.stdout?.on('data',(data:Buffer)=>{ //data arrives as byte streams
             const remaining=maxOutput-capturedBytes
-            if(remaining<=0)return;
+            if(remaining<=0){
+                outputTruncated = true;
+                return;
+            }
             const chunk = data.subarray(0, remaining);
+            if (chunk.length < data.length) {
+                outputTruncated = true;
+            }
             stdout+=chunk.toString()
             capturedBytes += chunk.length;
         })
 
         child.stderr?.on("data", (data: Buffer) => {
             const remaining = maxOutput - capturedBytes;
-            if (remaining <= 0) return;
+            if(remaining<=0){
+                outputTruncated = true;
+                return;
+            }
             const chunk = data.subarray(0, remaining);
+            if (chunk.length < data.length) {
+                outputTruncated = true;
+            }
+            if (remaining <= 0) return;
             stderr += chunk.toString();
             capturedBytes += chunk.length;
         });
@@ -83,7 +97,8 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
                 stderr,
                 exitCode,
                 signal,
-                timedOut:timedOut_flag
+                timedOut:timedOut_flag,
+                outputTruncated: outputTruncated
             });
         });
     });

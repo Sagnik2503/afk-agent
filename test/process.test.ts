@@ -122,4 +122,34 @@ describe("ChildProcess", () => {
             expect(result.stdout).toBe("x".repeat(10));
             expect(result.stderr).toBe("");
         });
+
+        it("should not report truncation when output stays within the limit", async () => {
+            const result = await ChildProcess(
+            execPath,
+            ["-e", "process.stdout.write('out'); process.stderr.write('err')"],
+            { maxOutput: 100 }
+            );
+
+            expect(result.outputTruncated).toBe(false);
+        });
+
+        it("should report truncation when stdout exceeds the limit", async () => {
+            const result = await ChildProcess(
+            execPath,
+            ["-e", "process.stdout.write('x'.repeat(100))"],
+            { maxOutput: 10 }
+            );
+
+            expect(result.outputTruncated).toBe(true);
+        });
+
+        it("should report truncation when stderr exceeds the limit", async () => {
+            const result = await ChildProcess(
+            execPath,
+            ["-e", "process.stderr.write('x'.repeat(100))"],
+            { maxOutput: 10 }
+            );
+
+            expect(result.outputTruncated).toBe(true);
+        });
 });
