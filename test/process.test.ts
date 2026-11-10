@@ -81,4 +81,23 @@ describe("ChildProcess", () => {
         expect(result.timedOut).toBe(true);
         expect(result.signal).toBe("SIGKILL");
         }, 15000);
+
+        it("should capture a non-zero exit code", async () => {
+            const result = await ChildProcess("node", [
+            "-e",
+            "process.exit(2)",
+            ]);
+
+            expect(result.exitCode).toBe(2);
+        });
+
+        it("should execute inside the specified working directory", async () => {
+            const result = await ChildProcess(
+            "node",
+            ["-e", "console.log(process.cwd())"],
+            { cwd: process.cwd() }
+            );
+
+            expect(result.stdout.trim()).toBe(process.cwd());
+        });
 });
