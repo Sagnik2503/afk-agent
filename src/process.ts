@@ -11,6 +11,7 @@ export type ProcessResult={
 export type ProcessOptions = {
   cwd?: string;
   timeout?: number;
+  maxOutput?: number
 };
 
 export function ChildProcess(command: string, args: string[], options:ProcessOptions={}): Promise<ProcessResult> {
@@ -26,6 +27,8 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         let stdout = "";
         let stderr = "";
         let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+        let capturedBytes = 0;
+        const maxOutput = options.maxOutput ?? 1024 * 1024; //1MB (default) of shared output storage (stdout + stderr)
 
         const timer=options.timeout?setTimeout(()=>{
             timedOut_flag=true
@@ -49,12 +52,20 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
 
         },options.timeout):undefined
 
-        child.stdout?.on('data',(data:Buffer)=>{
-            stdout+=data.toString()
+        child.stdout?.on('data',(data:Buffer)=>{ //data arrives as byte streams
+            const remaining=maxOutput-capturedBytes
+            if(remaining<=0)return;
+            const chunk = data.subarray(0, remaining);
+            stdout+=chunk.toString()
+            capturedBytes += chunk.length;
         })
 
         child.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
+            const remaining = maxOutput - capturedBytes;
+            if (remaining <= 0) return;
+            const chunk = data.subarray(0, remaining);
+            stderr += chunk.toString();
+            capturedBytes += chunk.length;
         });
 
         child.on("error", (error) => {

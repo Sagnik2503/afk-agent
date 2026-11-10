@@ -100,4 +100,26 @@ describe("ChildProcess", () => {
 
             expect(result.stdout.trim()).toBe(process.cwd());
         });
+
+        it("should capture all output when within the maxOutput limit", async () => {
+            const result = await ChildProcess(
+            execPath,
+            ["-e", "process.stdout.write('out'); process.stderr.write('err')"],
+            { maxOutput: 100 }
+            );
+
+            expect(result.stdout).toBe("out");
+            expect(result.stderr).toBe("err");
+        });
+
+        it("should truncate output when the maxOutput limit is exceeded", async () => {
+            const result = await ChildProcess(
+            execPath,
+            ["-e", "process.stdout.write('x'.repeat(100))"],
+            { maxOutput: 10 }
+            );
+
+            expect(result.stdout).toBe("x".repeat(10));
+            expect(result.stderr).toBe("");
+        });
 });
