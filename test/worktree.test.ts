@@ -128,7 +128,22 @@ describe("setupWorktree", () => {
         }
     });
 
-    it("fails when the task's branch already exists", async () => {
+    it("fails when the task's branch already exists without a worktree", async () => {
+        const repo = await makeRepo();
+        const taskId = `task-${Date.now()}`;
+
+        try {
+            await ChildProcess("git", ["branch", `afk/${taskId}`], { cwd: repo });
+
+            await expect(setupWorktree(repo, taskId)).rejects.toThrow(
+                /Branch already exists/i
+            );
+        } finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+
+    it("fails when a worktree already exists for the task", async () => {
         const repo = await makeRepo();
         const taskId = `task-${Date.now()}`;
 
@@ -136,7 +151,7 @@ describe("setupWorktree", () => {
             await setupWorktree(repo, taskId);
 
             await expect(setupWorktree(repo, taskId)).rejects.toThrow(
-                /worktree creation failed/i
+                /already exists for task/i
             );
         } finally {
             await rm(repo, { recursive: true, force: true });

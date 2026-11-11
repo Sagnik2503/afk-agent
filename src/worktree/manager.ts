@@ -66,6 +66,8 @@ export async function setupWorktree(
     worktreePath: string;
 }> {
    
+    const existingWorktrees = await listWorktrees(repoPath);
+
     const branchName = `afk/${taskId}`;
     const worktreePath = path.join(
         repoPath,
@@ -73,6 +75,29 @@ export async function setupWorktree(
         "worktrees",
         taskId
     );
+    const resolvedWorktreePath = path.join(
+        await fs.realpath(repoPath),
+        ".afk",
+        "worktrees",
+        taskId
+    );
+
+    //checks if the worktree already exists or not
+    if (existingWorktrees.includes(resolvedWorktreePath)) {
+        throw new Error(`Worktree already exists for task: ${taskId}`);
+    }
+
+    //check for an existing branch whose worktree has not been created
+    const result = await ChildProcess(
+    "git",
+    ["branch", "--list", branchName],
+    { cwd: repoPath }
+    );
+
+    if (result.stdout.trim() !== "") {
+    throw new Error(`Branch already exists: ${branchName}`);
+    }
+    
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     await createWorktree(repoPath, branchName, worktreePath);
     return {
