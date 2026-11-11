@@ -23,6 +23,7 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         stdio: ["ignore", "pipe", "pipe"], //input, output, error
         detached: true
         });
+        
         let outputTruncated=false
         let timedOut_flag=false
         let stdout = "";
