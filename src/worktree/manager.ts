@@ -17,3 +17,20 @@ export async function createWorktree(
         );
     }
 }
+
+export async function removeWorktree(
+    repoPath: string,
+    worktreePath: string
+): Promise<void> {
+    const child = await ChildProcess(
+        "git",
+        ["worktree", "remove",worktreePath],
+        { cwd: repoPath }
+    );
+
+    if (child.exitCode !== 0) {
+        throw new Error(
+            `Git worktree removal failed: ${child.stderr}`
+        );
+    }
+}

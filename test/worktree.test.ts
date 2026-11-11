@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtemp, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWorktree } from "../src/worktree/manager.js";
+import { createWorktree, removeWorktree } from "../src/worktree/manager.js";
 import { ChildProcess } from "../src/process.js";
 
 async function makeRepo(): Promise<string> {
@@ -43,6 +43,50 @@ describe("createWorktree", () => {
             ).rejects.toThrow(/worktree creation failed/i);
         } finally {
             await rm(directory, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("removeWorktree", () => {
+    it("successfully removes an existing worktree", async () => {
+        const repo = await makeRepo();
+        const worktree = join(repo, "..", `afk-agent-wt-${Date.now()}`);
+
+        try {
+            await createWorktree(repo, "remove-me", worktree);
+            await removeWorktree(repo, worktree);
+
+            await expect(access(worktree)).rejects.toThrow();
+        } finally {
+            await rm(worktree, { recursive: true, force: true });
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+
+    it("fails when the worktree doesn't exist", async () => {
+        const repo = await makeRepo();
+
+        try {
+            await expect(
+                removeWorktree(repo, join(repo, "no-such-worktree"))
+            ).rejects.toThrow(/worktree removal failed/i);
+        } finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+
+    it("doesn't remove the original working directory", async () => {
+        const repo = await makeRepo();
+        const worktree = join(repo, "..", `afk-agent-wt-${Date.now()}`);
+
+        try {
+            await createWorktree(repo, "keep-repo", worktree);
+            await removeWorktree(repo, worktree);
+
+            await expect(access(repo)).resolves.toBeUndefined();
+        } finally {
+            await rm(worktree, { recursive: true, force: true });
+            await rm(repo, { recursive: true, force: true });
         }
     });
 });
