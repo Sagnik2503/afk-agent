@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { ChildProcess } from "../process.js";
 
 export async function createWorktree(
@@ -54,4 +56,28 @@ export async function removeWorktree(
             `Git worktree removal failed: ${child.stderr}`
         );
     }
+}
+
+export async function setupWorktree(
+    repoPath: string,
+    taskId: string
+): Promise<{
+    branchName: string;
+    worktreePath: string;
+}> {
+   
+    const branchName = `afk/${taskId}`;
+    const worktreePath = path.join(
+        repoPath,
+        ".afk",
+        "worktrees",
+        taskId
+    );
+    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
+    await createWorktree(repoPath, branchName, worktreePath);
+    return {
+    branchName,
+    worktreePath,
+  };
+
 }
