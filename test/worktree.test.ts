@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, rm, access } from "node:fs/promises";
+import { mkdtemp, rm, access, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWorktree, removeWorktree } from "../src/worktree/manager.js";
+import { createWorktree, removeWorktree, listWorktrees } from "../src/worktree/manager.js";
 import { ChildProcess } from "../src/process.js";
 
 async function makeRepo(): Promise<string> {
@@ -84,6 +84,24 @@ describe("removeWorktree", () => {
             await removeWorktree(repo, worktree);
 
             await expect(access(repo)).resolves.toBeUndefined();
+        } finally {
+            await rm(worktree, { recursive: true, force: true });
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("listWorktrees", () => {
+    it("returns the main repo and any created worktree paths", async () => {
+        const repo = await makeRepo();
+        const worktree = join(repo, "..", `afk-agent-wt-${Date.now()}`);
+
+        try {
+            await createWorktree(repo, "listed-branch", worktree);
+            const paths = await listWorktrees(repo);
+
+            expect(paths).toContain(await realpath(worktree));
+            expect(paths.length).toBe(2);
         } finally {
             await rm(worktree, { recursive: true, force: true });
             await rm(repo, { recursive: true, force: true });

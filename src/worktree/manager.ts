@@ -18,6 +18,27 @@ export async function createWorktree(
     }
 }
 
+export async function listWorktrees(
+    repoPath: string
+): Promise<string[]> {
+    const child = await ChildProcess(
+        "git",
+        ["worktree", "list", "--porcelain"],
+        { cwd: repoPath }
+    );
+
+    if (child.exitCode !== 0) {
+        throw new Error(
+            `Git worktree list failed: ${child.stderr}`
+        );
+    }
+
+    return child.stdout
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "))
+        .map((line) => line.slice("worktree ".length).trim());
+}
+
 export async function removeWorktree(
     repoPath: string,
     worktreePath: string
