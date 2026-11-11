@@ -128,6 +128,33 @@ describe("setupWorktree", () => {
         }
     });
 
+    it("accepts a valid task id of letters, digits, underscores and hyphens", async () => {
+        const repo = await makeRepo();
+        const taskId = "Task_123-abc";
+
+        try {
+            const result = await setupWorktree(repo, taskId);
+
+            expect(result.branchName).toBe(`afk/${taskId}`);
+            await expect(access(result.worktreePath)).resolves.toBeUndefined();
+        } finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects an invalid task id", async () => {
+        const repo = await makeRepo();
+
+        try {
+            await expect(setupWorktree(repo, "../escape")).rejects.toThrow(
+                /Invalid task ID/i
+            );
+            await expect(access(join(repo, ".afk"))).rejects.toThrow();
+        } finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+
     it("fails when the task's branch already exists without a worktree", async () => {
         const repo = await makeRepo();
         const taskId = `task-${Date.now()}`;

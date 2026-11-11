@@ -66,6 +66,11 @@ export async function setupWorktree(
     worktreePath: string;
 }> {
    
+    //check for invalid task ids
+    if (!/^[a-zA-Z0-9_-]+$/.test(taskId)) {
+        throw new Error("Invalid task ID");
+    }
+    
     const existingWorktrees = await listWorktrees(repoPath);
 
     const branchName = `afk/${taskId}`;
@@ -97,7 +102,7 @@ export async function setupWorktree(
     if (result.stdout.trim() !== "") {
     throw new Error(`Branch already exists: ${branchName}`);
     }
-    
+
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     await createWorktree(repoPath, branchName, worktreePath);
     return {
