@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/package",
   "name": "afk-agent",
   "version": "1.0.0",
   "description": "afk-agent",
