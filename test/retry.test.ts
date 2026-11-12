@@ -50,13 +50,41 @@ describe("runWithRetries", () => {
     it("returns one successful report when the first attempt passes", async () => {
         const deps = makeDeps();
 
-        const reports = await runWithRetries(input, deps);
+        const { reports, error } = await runWithRetries(input, deps);
 
+        expect(error).toBeNull();
         expect(reports).toHaveLength(1);
         expect(reports[0]?.success).toBe(true);
         expect(deps.runAgent).toHaveBeenCalledTimes(1);
         expect(deps.runTests).toHaveBeenCalledTimes(1);
         expect(deps.getChangedFiles).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns collected reports and the error when tests throw", async () => {
+        const deps = makeDeps();
+        deps.runTests
+            .mockResolvedValueOnce(testResult({ passed: false }))
+            .mockRejectedValueOnce(new Error("npm exploded"));
+
+        const { reports, error } = await runWithRetries(input, deps);
+
+        expect(reports).toHaveLength(1);
+        expect(error).toBe("npm exploded");
+        expect(deps.runAgent).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns collected reports and the error when changed files throw", async () => {
+        const deps = makeDeps();
+        deps.runTests.mockResolvedValueOnce(testResult({ passed: false }));
+        deps.getChangedFiles
+            .mockResolvedValueOnce(["src/a.ts"])
+            .mockRejectedValueOnce(new Error("git exploded"));
+
+        const { reports, error } = await runWithRetries(input, deps);
+
+        expect(reports).toHaveLength(1);
+        expect(error).toBe("git exploded");
+        expect(deps.runAgent).toHaveBeenCalledTimes(2);
     });
 
     it("runs tests after an agent crash and stops without retrying", async () => {
@@ -65,7 +93,7 @@ describe("runWithRetries", () => {
             agentResult({ exitCode: 1, stderr: "boom" })
         );
 
-        const reports = await runWithRetries(input, deps);
+        const { reports } = await runWithRetries(input, deps);
 
         expect(reports).toHaveLength(1);
         expect(reports[0]?.success).toBe(false);
@@ -80,7 +108,7 @@ describe("runWithRetries", () => {
             agentResult({ timedOut: true, signal: "SIGTERM" })
         );
 
-        const reports = await runWithRetries(input, deps);
+        const { reports } = await runWithRetries(input, deps);
 
         expect(reports).toHaveLength(1);
         expect(reports[0]?.agentTimedOut).toBe(true);
@@ -94,7 +122,7 @@ describe("runWithRetries", () => {
             testResult({ passed: false, stderr: "still failing" })
         );
 
-        const reports = await runWithRetries(input, deps);
+        const { reports } = await runWithRetries(input, deps);
 
         expect(reports).toHaveLength(3);
         expect(reports.every((report) => !report.success)).toBe(true);
@@ -113,7 +141,7 @@ describe("runWithRetries", () => {
             .mockResolvedValueOnce(testResult({ passed: false }))
             .mockResolvedValueOnce(testResult({ passed: true }));
 
-        const reports = await runWithRetries(input, deps);
+        const { reports } = await runWithRetries(input, deps);
 
         expect(reports).toHaveLength(2);
         expect(reports[1]?.success).toBe(true);
@@ -126,7 +154,7 @@ describe("runWithRetries", () => {
             testResult({ passed: false, timedOut: true })
         );
 
-        const reports = await runWithRetries(input, deps);
+        const { reports } = await runWithRetries(input, deps);
 
         expect(reports).toHaveLength(3);
     });

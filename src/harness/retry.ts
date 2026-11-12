@@ -16,6 +16,15 @@ export type RetryInput = {
   prompt: string;
 };
 
+export type RetryResult = {
+  reports: HarnessReport[];
+  error: string | null;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function buildRetryPrompt(
   prompt: string,
   testResult: TestResult,
@@ -40,14 +49,21 @@ function buildRetryPrompt(
 export async function runWithRetries(
   input: RetryInput,
   deps: RetryDependencies
-): Promise<HarnessReport[]> {
+): Promise<RetryResult> {
   const reports: HarnessReport[] = [];
   let prompt = input.prompt;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const agentResult = await deps.runAgent(input.worktreePath, prompt);
-    const testResult = await deps.runTests(input.worktreePath);
-    const changedFiles = await deps.getChangedFiles(input.worktreePath);
+
+    let testResult: TestResult;
+    let changedFiles: string[];
+    try {
+      testResult = await deps.runTests(input.worktreePath);
+      changedFiles = await deps.getChangedFiles(input.worktreePath);
+    } catch (error) {
+      return { reports, error: getErrorMessage(error) };
+    }
 
     const report = buildReport({
       taskId: input.taskId,
@@ -66,5 +82,5 @@ export async function runWithRetries(
     }
   }
 
-  return reports;
+  return { reports, error: null };
 }
