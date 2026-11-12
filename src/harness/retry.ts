@@ -61,7 +61,9 @@ export async function runWithRetries(
       break;
     }
 
-    prompt = buildRetryPrompt(input.prompt, testResult, changedFiles);
+    if (attempt < MAX_ATTEMPTS) {
+      prompt = buildRetryPrompt(input.prompt, testResult, changedFiles);
+    }
   }
 
   return reports;
