@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import {
     createDockerAgent,
     type DockerAgentOptions,
@@ -11,7 +12,7 @@ import { runTests } from "./validation.js";
 
 export type RunTaskInput = {
     repoPath: string;
-    taskId: string;
+    taskId?: string;
     issueId: string;
     prompt: string;
     model?: string;
@@ -32,10 +33,11 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
     }
 
     const repoPath = path.resolve(input.repoPath);
+    const taskId = input.taskId ?? randomUUID();
 
     const agentOptions: DockerAgentOptions = {
         repoPath,
-        taskId: input.taskId,
+        taskId,
         issueId: input.issueId,
     };
     if (input.model !== undefined) {
@@ -52,14 +54,14 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
 
     const { branchName, worktreePath } = await setupWorktree(
         repoPath,
-        input.taskId
+        taskId
     );
 
     await agent.prepareImage();
 
     const { reports, error } = await runWithRetries(
         {
-            taskId: input.taskId,
+            taskId,
             worktreePath,
             prompt: input.prompt,
         },

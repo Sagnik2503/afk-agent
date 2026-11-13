@@ -158,6 +158,35 @@ describe("runTask", () => {
         expect(agent.run).toHaveBeenCalledWith(input.prompt);
     });
 
+    it("generates a unique task id for each execution when none is provided", async () => {
+        const withoutTaskId = {
+            repoPath: "/repo",
+            issueId: "issue-1",
+            prompt: "Fix the failing tests.",
+        };
+
+        await runTask(withoutTaskId);
+        await runTask(withoutTaskId);
+
+        const firstTaskId = mockedSetupWorktree.mock.calls[0]?.[1];
+        const secondTaskId = mockedSetupWorktree.mock.calls[1]?.[1];
+        const uuidPattern =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+        expect(firstTaskId).toMatch(uuidPattern);
+        expect(secondTaskId).toMatch(uuidPattern);
+        expect(firstTaskId).not.toBe(secondTaskId);
+        expect(mockedCreateDockerAgent.mock.calls[0]?.[0].taskId).toBe(
+            firstTaskId
+        );
+        expect(mockedCreateDockerAgent.mock.calls[0]?.[0].issueId).toBe(
+            withoutTaskId.issueId
+        );
+        expect(mockedRunWithRetries.mock.calls[0]?.[0].taskId).toBe(
+            firstTaskId
+        );
+    });
+
     it("returns the branch, worktree, reports, and error", async () => {
         const reports = [] as HarnessReport[];
         mockedRunWithRetries.mockResolvedValue({

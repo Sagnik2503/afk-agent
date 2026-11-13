@@ -1,7 +1,10 @@
 
+import { randomUUID } from "node:crypto";
 import { Command } from "commander";
 import { runTask } from "./harness/orchestrator.js";
 import { fetchGitHubIssue } from "./github/fetch_issues.js";
+import { validateRepository } from "./github/repo_validation.js";
+import { buildIssuePrompt } from "./agent/prompt.js";
 
 const program = new Command();
 
@@ -14,13 +17,15 @@ program
   .command("run")
   .description("Run an AFK coding task")
   .requiredOption("--repo <path>", "Repository path")
-  .requiredOption("--task <id>", "Internal task ID")
   .requiredOption("--issue <id>", "GitHub issue ID")
   .action(async (options) => {
     try {
+      const repoPath = await validateRepository(options.repo);
+      console.log("Validated repository:", repoPath);
+      
       // 1. Fetch GitHub issue
       const issue = await fetchGitHubIssue(
-        options.repo,
+        repoPath,
         options.issue
       );
 
@@ -29,19 +34,12 @@ program
       console.log("URL:", issue.url);
 
       // 2. Build agent prompt
-      const prompt = `
-        Task: ${issue.title}
-
-        Description:
-        ${issue.body}
-
-        Implement this task. Run the relevant tests.
-      `;
+      const prompt = buildIssuePrompt(issue);
 
       // 3. Execute task
       const result = await runTask({
-        repoPath: options.repo,
-        taskId: options.task,
+        repoPath,
+        taskId: randomUUID(),
         issueId: options.issue,
         prompt,
       });
