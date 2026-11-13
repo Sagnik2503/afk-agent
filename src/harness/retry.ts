@@ -46,6 +46,7 @@ function buildRetryPrompt(
   ].join("\n");
 }
 
+
 export async function runWithRetries(
   input: RetryInput,
   deps: RetryDependencies
@@ -54,14 +55,32 @@ export async function runWithRetries(
   let prompt = input.prompt;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Agent launch errors propagate to the caller.
     const agentResult = await deps.runAgent(input.worktreePath, prompt);
 
     let testResult: TestResult;
-    let changedFiles: string[];
+
     try {
       testResult = await deps.runTests(input.worktreePath);
+    } catch (error) {
+      return { reports, error: getErrorMessage(error) };
+    }
+
+    let changedFiles: string[];
+
+    try {
       changedFiles = await deps.getChangedFiles(input.worktreePath);
     } catch (error) {
+      // Preserve the agent and test results in a report.
+      const report = buildReport({
+        taskId: input.taskId,
+        agentResult,
+        testResult,
+        changedFiles: [],
+      });
+
+      reports.push(report);
+
       return { reports, error: getErrorMessage(error) };
     }
 
@@ -71,6 +90,7 @@ export async function runWithRetries(
       testResult,
       changedFiles,
     });
+
     reports.push(report);
 
     if (report.executionStatus !== "completed" || testResult.passed) {

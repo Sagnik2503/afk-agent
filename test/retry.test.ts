@@ -82,7 +82,9 @@ describe("runWithRetries", () => {
 
         const { reports, error } = await runWithRetries(input, deps);
 
-        expect(reports).toHaveLength(1);
+        expect(reports).toHaveLength(2);
+        expect(reports[1]?.changedFiles).toEqual([]);
+        expect(reports[1]?.testsPassed).toBe(true);
         expect(error).toBe("git exploded");
         expect(deps.runAgent).toHaveBeenCalledTimes(2);
     });
