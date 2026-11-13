@@ -40,6 +40,13 @@ describe("createDockerAgent", () => {
         expect(mockedChildProcess).not.toHaveBeenCalled();
     });
 
+    it("rejects an invalid issue id before running Docker", () => {
+        expect(() =>
+            createDockerAgent({ ...options, issueId: "issue\n" })
+        ).toThrow("Invalid issue ID");
+        expect(mockedChildProcess).not.toHaveBeenCalled();
+    });
+
     it("skips the build when the image already exists", async () => {
         const agent = createDockerAgent(options);
 
@@ -55,7 +62,9 @@ describe("createDockerAgent", () => {
 
     it("builds the image when it is missing", async () => {
         mockedChildProcess
-            .mockResolvedValueOnce(result({ exitCode: 1 }))
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "No such image" })
+            )
             .mockResolvedValueOnce(result());
 
         const agent = createDockerAgent(options);
@@ -72,8 +81,12 @@ describe("createDockerAgent", () => {
 
     it("throws with the build stderr when the build fails", async () => {
         mockedChildProcess
-            .mockResolvedValueOnce(result({ exitCode: 1 }))
-            .mockResolvedValueOnce(result({ exitCode: 1, stderr: "no base image" }));
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "No such image" })
+            )
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "no base image" })
+            );
 
         const agent = createDockerAgent(options);
 
@@ -91,6 +104,22 @@ describe("createDockerAgent", () => {
         expect(mockedChildProcess).toHaveBeenCalledTimes(1);
     });
 
+    it("throws when inspection fails for a reason other than a missing image", async () => {
+        mockedChildProcess.mockResolvedValueOnce(
+            result({
+                exitCode: 1,
+                stderr: "Cannot connect to the Docker daemon",
+            })
+        );
+
+        const agent = createDockerAgent(options);
+
+        await expect(agent.prepareImage()).rejects.toThrow(
+            "Cannot connect to the Docker daemon"
+        );
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
+    });
+
     it("removes a stale container before running the agent", async () => {
         const agent = createDockerAgent(options);
 
@@ -100,7 +129,7 @@ describe("createDockerAgent", () => {
             1,
             "docker",
             ["rm", "-f", "afk-task-1"],
-            { timeout: 600_000 }
+            { timeout: 10_000 }
         );
     });
 
@@ -122,6 +151,43 @@ describe("createDockerAgent", () => {
         const agent = createDockerAgent(options);
 
         await expect(agent.run("Fix it")).rejects.toThrow("permission denied");
+    });
+
+    it("removes the container again after a successful run", async () => {
+        const agent = createDockerAgent(options);
+
+        await agent.run("Fix it");
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            3,
+            "docker",
+            ["rm", "-f", "afk-task-1"],
+            { timeout: 10_000 }
+        );
+    });
+
+    it("throws the cleanup error when the run succeeds but cleanup fails", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "permission denied" })
+            );
+
+        const agent = createDockerAgent(options);
+
+        await expect(agent.run("Fix it")).rejects.toThrow("permission denied");
+    });
+
+    it("keeps the run error when cleanup also fails", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockRejectedValueOnce(new Error("run exploded"))
+            .mockRejectedValueOnce(new Error("cleanup exploded"));
+
+        const agent = createDockerAgent(options);
+
+        await expect(agent.run("Fix it")).rejects.toThrow("run exploded");
     });
 
     it("produces the run argv for the task", async () => {
@@ -154,6 +220,7 @@ describe("createDockerAgent", () => {
                 "opencode",
                 "run",
                 "--auto",
+                "--pure",
                 "--model",
                 "opencode/deepseek-v4.1-flash-free",
                 "Fix it",
@@ -172,7 +239,9 @@ describe("createDockerAgent", () => {
         });
 
         mockedChildProcess
-            .mockResolvedValueOnce(result({ exitCode: 1 }))
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "No such image" })
+            )
             .mockResolvedValueOnce(result());
 
         await agent.prepareImage();
@@ -229,7 +298,7 @@ describe("createDockerAgent", () => {
             3,
             "docker",
             ["rm", "-f", "afk-task-1"],
-            { timeout: 600_000 }
+            { timeout: 10_000 }
         );
     });
 });
