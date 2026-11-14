@@ -1,0 +1,2 @@
+- during grilling sessions, make sure the questions are easy to understand.
+- follow the questions with simple examples as to how it will work.
