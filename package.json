@@ -9,11 +9,15 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "dev": "tsx src/cli.ts",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.10.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"

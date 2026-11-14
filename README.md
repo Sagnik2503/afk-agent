@@ -67,9 +67,9 @@ AFK Agent orchestrates the entire execution lifecycle.
 Each execution is associated with two identifiers:
 
 - **Issue ID:** The external GitHub issue being worked on.
-- **Task ID:** A unique internal identifier generated for each execution.
+- **Task ID:** A stable identifier derived from the issue, such as `issue-142-add-slug-helper`.
 
-This allows the same GitHub issue to be executed multiple times without worktree or branch-name collisions.
+The same GitHub issue always maps to the same branch. Re-running an issue resumes its existing branch instead of creating a new one.
 
 ## Core design
 
@@ -87,6 +87,7 @@ Each worktree is checked out on a dedicated branch:
 
 ```text
 afk/<task-id>
+# e.g. afk/issue-142-add-slug-helper
 ```
 
 Worktrees provide separate working directories while sharing the underlying Git repository.
@@ -210,12 +211,16 @@ AFK Agent will:
 
 1. Validate the repository.
 2. Fetch the GitHub issue.
-3. Generate a unique task ID.
-4. Create a worktree and branch.
+3. Derive a stable task ID from the issue.
+4. Create or resume a worktree and branch.
 5. Prepare the Docker image.
 6. Execute OpenCode.
 7. Run tests and retries.
-8. Print the final execution report.
+8. Commit any leftover changes.
+9. Push the branch and comment on the issue.
+10. Print the final execution report.
+
+Pass `--no-push` to keep the branch local. The issue comment is still posted.
 
 ---
 
@@ -242,6 +247,13 @@ The corresponding branch is:
 ```text
 afk/<task-id>
 ```
+
+On success or failure, AFK Agent pushes that branch to `origin` and posts a
+comment on the issue with the branch link, commit list, test result, and any
+remaining problems. The push is refused when the branch is not under `afk/`,
+when `origin` does not match the issue's repository, when the branch would
+need a force-push, or when a changed file looks like a secret (for example
+`.env`, `*.pem`, or `id_rsa`).
 
 You can inspect the changes with:
 
