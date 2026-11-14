@@ -8,14 +8,16 @@ async function makeProject(testScript: string): Promise<string> {
     const directory = await mkdtemp(join(tmpdir(), "afk-agent-validation-"));
     await writeFile(
         join(directory, "package.json"),
-        JSON.stringify({ name: "fixture", scripts: { test: testScript } })
+        JSON.stringify({ name: "fixture", scripts: { test: testScript } }),
     );
     return directory;
 }
 
 describe("runTests", () => {
     it("runs the package test script in the worktree", async () => {
-        const directory = await makeProject("node -e \"console.log('passed')\"");
+        const directory = await makeProject(
+            "node -e \"console.log('passed')\"",
+        );
 
         try {
             const result = await runTests(directory);
@@ -30,7 +32,7 @@ describe("runTests", () => {
 
     it("returns the failure details when the tests fail", async () => {
         const directory = await makeProject(
-            "node -e \"console.error('nope'); process.exit(1)\""
+            "node -e \"console.error('nope'); process.exit(1)\"",
         );
 
         try {

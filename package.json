@@ -1,36 +1,37 @@
 {
-  "$schema": "https://json.schemastore.org/package",
-  "name": "afk-agent",
-  "version": "1.0.0",
-  "description": "afk-agent",
-  "license": "ISC",
-  "author": "",
-  "type": "module",
-  "main": "index.js",
-  "overrides": {
-    "minimatch": "^11.0.8"
-  },
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "dev": "tsx src/cli.ts",
-    "test:watch": "vitest",
-    "check": "npm run typecheck && npm test",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.6",
-    "eslint": "^10.15.0",
-    "lint-staged": "^17.6.0",
-    "prettier": "^3.10.1",
-    "tsx": "^4.23.15",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.2",
-    "vitest": "^4.1.12"
-  },
-  "dependencies": {
-    "commander": "^15.1.0"
-  }
+    "$schema": "https://json.schemastore.org/package",
+    "name": "afk-agent",
+    "version": "1.0.0",
+    "description": "afk-agent",
+    "license": "ISC",
+    "author": "",
+    "type": "module",
+    "main": "index.js",
+    "overrides": {
+        "minimatch": "^11.0.8"
+    },
+    "scripts": {
+        "test": "vitest run",
+        "typecheck": "tsc --noEmit",
+        "dev": "tsx src/cli.ts",
+        "test:watch": "vitest",
+        "check": "npm run typecheck && npm test",
+        "lint": "eslint .",
+        "format:check": "prettier --check .",
+        "lint:fix": "eslint . --fix"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "@types/node": "^26.6.6",
+        "eslint": "^10.15.0",
+        "lint-staged": "^17.6.0",
+        "prettier": "^3.10.1",
+        "tsx": "^4.23.15",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.72.2",
+        "vitest": "^4.1.12"
+    },
+    "dependencies": {
+        "commander": "^15.1.0"
+    }
 }

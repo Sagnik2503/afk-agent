@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import { mkdtemp, rm, access, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWorktree, removeWorktree, listWorktrees, setupWorktree } from "../src/worktree/manager.js";
+import {
+    createWorktree,
+    removeWorktree,
+    listWorktrees,
+    setupWorktree,
+} from "../src/worktree/manager.js";
 import { ChildProcess } from "../src/process.js";
 
 async function makeRepo(): Promise<string> {
@@ -10,8 +15,18 @@ async function makeRepo(): Promise<string> {
     await ChildProcess("git", ["init", "-q"], { cwd: repo });
     await ChildProcess(
         "git",
-        ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "--allow-empty", "-m", "init"],
-        { cwd: repo }
+        [
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+        { cwd: repo },
     );
     return repo;
 }
@@ -26,7 +41,11 @@ describe("createWorktree", () => {
 
             await expect(access(worktree)).resolves.toBeUndefined();
 
-            const branches = await ChildProcess("git", ["branch", "--list", "feature-branch"], { cwd: repo });
+            const branches = await ChildProcess(
+                "git",
+                ["branch", "--list", "feature-branch"],
+                { cwd: repo },
+            );
             expect(branches.stdout).toContain("feature-branch");
         } finally {
             await rm(worktree, { recursive: true, force: true });
@@ -39,7 +58,11 @@ describe("createWorktree", () => {
 
         try {
             await expect(
-                createWorktree(directory, "feature-branch", join(directory, "worktree"))
+                createWorktree(
+                    directory,
+                    "feature-branch",
+                    join(directory, "worktree"),
+                ),
             ).rejects.toThrow(/worktree creation failed/i);
         } finally {
             await rm(directory, { recursive: true, force: true });
@@ -68,7 +91,7 @@ describe("removeWorktree", () => {
 
         try {
             await expect(
-                removeWorktree(repo, join(repo, "no-such-worktree"))
+                removeWorktree(repo, join(repo, "no-such-worktree")),
             ).rejects.toThrow(/worktree removal failed/i);
         } finally {
             await rm(repo, { recursive: true, force: true });
@@ -118,10 +141,16 @@ describe("setupWorktree", () => {
             const result = await setupWorktree(repo, taskId);
 
             expect(result.branchName).toBe(`afk/${taskId}`);
-            expect(result.worktreePath).toBe(join(repo, ".afk", "worktrees", taskId));
+            expect(result.worktreePath).toBe(
+                join(repo, ".afk", "worktrees", taskId),
+            );
             await expect(access(result.worktreePath)).resolves.toBeUndefined();
 
-            const branches = await ChildProcess("git", ["branch", "--list", `afk/${taskId}`], { cwd: repo });
+            const branches = await ChildProcess(
+                "git",
+                ["branch", "--list", `afk/${taskId}`],
+                { cwd: repo },
+            );
             expect(branches.stdout).toContain(`afk/${taskId}`);
         } finally {
             await rm(repo, { recursive: true, force: true });
@@ -147,7 +176,7 @@ describe("setupWorktree", () => {
 
         try {
             await expect(setupWorktree(repo, "../escape")).rejects.toThrow(
-                /Invalid task ID/i
+                /Invalid task ID/i,
             );
             await expect(access(join(repo, ".afk"))).rejects.toThrow();
         } finally {
@@ -155,16 +184,19 @@ describe("setupWorktree", () => {
         }
     });
 
-    it("fails when the task's branch already exists without a worktree", async () => {
+    it("resumes the task's branch when it exists without a worktree", async () => {
         const repo = await makeRepo();
         const taskId = `task-${Date.now()}`;
 
         try {
-            await ChildProcess("git", ["branch", `afk/${taskId}`], { cwd: repo });
+            await ChildProcess("git", ["branch", `afk/${taskId}`], {
+                cwd: repo,
+            });
 
-            await expect(setupWorktree(repo, taskId)).rejects.toThrow(
-                /Branch already exists/i
-            );
+            const result = await setupWorktree(repo, taskId);
+
+            expect(result.branchName).toBe(`afk/${taskId}`);
+            await expect(access(result.worktreePath)).resolves.toBeUndefined();
         } finally {
             await rm(repo, { recursive: true, force: true });
         }
@@ -178,7 +210,7 @@ describe("setupWorktree", () => {
             await setupWorktree(repo, taskId);
 
             await expect(setupWorktree(repo, taskId)).rejects.toThrow(
-                /already exists for task/i
+                /already exists for task/i,
             );
         } finally {
             await rm(repo, { recursive: true, force: true });

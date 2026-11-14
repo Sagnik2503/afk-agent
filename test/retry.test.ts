@@ -25,17 +25,16 @@ function testResult(overrides: Partial<TestResult> = {}): TestResult {
     };
 }
 
-type RunAgentFn = (worktreePath: string, prompt: string) => Promise<ProcessResult>;
+type RunAgentFn = (
+    worktreePath: string,
+    prompt: string,
+) => Promise<ProcessResult>;
 
 function makeDeps() {
     return {
         runAgent: vi.fn<RunAgentFn>(async () => agentResult()),
-        runTests: vi.fn(
-            async (): Promise<TestResult> => testResult()
-        ),
-        getChangedFiles: vi.fn(
-            async (): Promise<string[]> => ["src/a.ts"]
-        ),
+        runTests: vi.fn(async (): Promise<TestResult> => testResult()),
+        getChangedFiles: vi.fn(async (): Promise<string[]> => ["src/a.ts"]),
     };
 }
 
@@ -91,7 +90,7 @@ describe("runWithRetries", () => {
     it("runs tests after an agent crash and stops without retrying", async () => {
         const deps = makeDeps();
         deps.runAgent.mockResolvedValue(
-            agentResult({ exitCode: 1, stderr: "boom" })
+            agentResult({ exitCode: 1, stderr: "boom" }),
         );
 
         const { reports } = await runWithRetries(input, deps);
@@ -106,7 +105,7 @@ describe("runWithRetries", () => {
     it("stops after an agent timeout even if tests pass", async () => {
         const deps = makeDeps();
         deps.runAgent.mockResolvedValue(
-            agentResult({ timedOut: true, signal: "SIGTERM" })
+            agentResult({ timedOut: true, signal: "SIGTERM" }),
         );
 
         const { reports } = await runWithRetries(input, deps);
@@ -120,7 +119,7 @@ describe("runWithRetries", () => {
     it("retries failing tests up to three total attempts", async () => {
         const deps = makeDeps();
         deps.runTests.mockResolvedValue(
-            testResult({ passed: false, stderr: "still failing" })
+            testResult({ passed: false, stderr: "still failing" }),
         );
 
         const { reports } = await runWithRetries(input, deps);
@@ -129,11 +128,9 @@ describe("runWithRetries", () => {
         expect(reports.every((report) => !report.success)).toBe(true);
         expect(deps.runAgent).toHaveBeenCalledTimes(3);
         expect(deps.runTests).toHaveBeenCalledTimes(3);
-        expect(deps.runAgent.mock.calls.map(([worktreePath]) => worktreePath)).toEqual([
-            input.worktreePath,
-            input.worktreePath,
-            input.worktreePath,
-        ]);
+        expect(
+            deps.runAgent.mock.calls.map(([worktreePath]) => worktreePath),
+        ).toEqual([input.worktreePath, input.worktreePath, input.worktreePath]);
     });
 
     it("stops early when a retry passes", async () => {
@@ -152,7 +149,7 @@ describe("runWithRetries", () => {
     it("retries when tests time out", async () => {
         const deps = makeDeps();
         deps.runTests.mockResolvedValue(
-            testResult({ passed: false, timedOut: true })
+            testResult({ passed: false, timedOut: true }),
         );
 
         const { reports } = await runWithRetries(input, deps);
@@ -164,7 +161,11 @@ describe("runWithRetries", () => {
         const deps = makeDeps();
         deps.runTests
             .mockResolvedValueOnce(
-                testResult({ passed: false, stdout: "stdout-1", stderr: "stderr-1" })
+                testResult({
+                    passed: false,
+                    stdout: "stdout-1",
+                    stderr: "stderr-1",
+                }),
             )
             .mockResolvedValueOnce(testResult({ passed: true }));
 

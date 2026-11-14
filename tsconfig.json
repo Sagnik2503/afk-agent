@@ -1,52 +1,54 @@
 {
-  "compilerOptions": {
-    /* Target & Environment */
-    "target": "es2022", /* Standard for Node.js 18+ to leverage modern features without downleveling overhead */
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "moduleDetection": "force",
-    "lib": ["es2022"], /* Excludes DOM APIs entirely so you cannot accidentally use 'window' or 'document' */
-    "types": ["node"],
+    "compilerOptions": {
+        /* Target & Environment */
+        "target": "es2022" /* Standard for Node.js 18+ to leverage modern features without downleveling overhead */,
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "moduleDetection": "force",
+        "lib": [
+            "es2022"
+        ] /* Excludes DOM APIs entirely so you cannot accidentally use 'window' or 'document' */,
+        "types": ["node"],
 
-    /* File Structure Layout */
-    "rootDir": ".",
-    "outDir": "./dist",
+        /* File Structure Layout */
+        "rootDir": ".",
+        "outDir": "./dist",
 
-    /* Strict Type-Checking Suite */
-    "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "strictBindCallApply": true,
-    "strictPropertyInitialization": true,
-    "noImplicitThis": true,
-    "useUnknownInCatchVariables": true,
-    
-    /* Ultimate Compile-Time Traps */
-    "noUncheckedIndexedAccess": true, /* Traps raw dictionary lookups */
-    "exactOptionalPropertyTypes": true, /* Disallows explicitly defining keys as undefined */
-    "noPropertyAccessFromIndexSignature": true, /* Requires bracket notation for dynamic maps */
-    
-    /* Strict Code Style Warnings */
-    "noImplicitReturns": true,
-    "noImplicitOverride": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true,
+        /* Strict Type-Checking Suite */
+        "strict": true,
+        "noImplicitAny": true,
+        "strictNullChecks": true,
+        "strictFunctionTypes": true,
+        "strictBindCallApply": true,
+        "strictPropertyInitialization": true,
+        "noImplicitThis": true,
+        "useUnknownInCatchVariables": true,
 
-    /* ESM Interop Enforcement */
-    "verbatimModuleSyntax": true, /* Keeps imports clean; separates type-only expressions */
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+        /* Ultimate Compile-Time Traps */
+        "noUncheckedIndexedAccess": true /* Traps raw dictionary lookups */,
+        "exactOptionalPropertyTypes": true /* Disallows explicitly defining keys as undefined */,
+        "noPropertyAccessFromIndexSignature": true /* Requires bracket notation for dynamic maps */,
 
-    /* Build and Debug Properties */
-    "noEmitOnError": true, /* Crucial for Backend: Never generate code if a compilation error is present */
-    "sourceMap": true, /* Generates .js.map files so stack traces match your actual .ts lines */
-    "declaration": false, /* Keep false for applications; only true if writing a reusable shared npm package */
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*", "test/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+        /* Strict Code Style Warnings */
+        "noImplicitReturns": true,
+        "noImplicitOverride": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUncheckedSideEffectImports": true,
+
+        /* ESM Interop Enforcement */
+        "verbatimModuleSyntax": true /* Keeps imports clean; separates type-only expressions */,
+        "isolatedModules": true,
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+
+        /* Build and Debug Properties */
+        "noEmitOnError": true /* Crucial for Backend: Never generate code if a compilation error is present */,
+        "sourceMap": true /* Generates .js.map files so stack traces match your actual .ts lines */,
+        "declaration": false /* Keep false for applications; only true if writing a reusable shared npm package */,
+        "skipLibCheck": true
+    },
+    "include": ["src/**/*", "test/**/*.ts"],
+    "exclude": ["node_modules", "dist"]
 }

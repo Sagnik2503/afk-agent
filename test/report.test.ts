@@ -3,7 +3,9 @@ import type { ProcessResult } from "../src/process.js";
 import type { TestResult } from "../src/harness/validation.js";
 import { buildReport } from "../src/harness/report.js";
 
-function makeAgentResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
+function makeAgentResult(
+    overrides: Partial<ProcessResult> = {},
+): ProcessResult {
     return {
         stdout: "",
         stderr: "",

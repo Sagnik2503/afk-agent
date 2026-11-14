@@ -16,10 +16,10 @@ const dockerReady = await ChildProcess("docker", ["info"])
 
 describe.skipIf(!dockerReady)("Docker agent integration", () => {
     const sourceDockerfile = fileURLToPath(
-        new URL("../Dockerfile", import.meta.url)
+        new URL("../Dockerfile", import.meta.url),
     );
     const sourceDockerignore = fileURLToPath(
-        new URL("../.dockerignore", import.meta.url)
+        new URL("../.dockerignore", import.meta.url),
     );
     const runTimeout = 5 * 60 * 1000;
     const taskId = `integration-${process.pid}-${Date.now()}`;
@@ -29,7 +29,7 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
 
     beforeAll(async () => {
         repo = await realpath(
-            await mkdtemp(join(tmpdir(), "afk-agent-docker-"))
+            await mkdtemp(join(tmpdir(), "afk-agent-docker-")),
         );
 
         await ChildProcess("git", ["init", "-q"], { cwd: repo });
@@ -48,7 +48,7 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
                 "-m",
                 "init",
             ],
-            { cwd: repo }
+            { cwd: repo },
         );
         await setupWorktree(repo, taskId);
     }, 60_000);
@@ -95,7 +95,7 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
                     "rev-parse",
                     "--show-toplevel",
                 ],
-                { timeout: 60_000 }
+                { timeout: 60_000 },
             );
 
             expect(git.exitCode).toBe(0);
@@ -106,7 +106,7 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
                 [
                     "Inspect the repository and explain its directory structure.",
                     "Do not modify any files.",
-                ].join("\n")
+                ].join("\n"),
             );
             const elapsed = Date.now() - started;
 
@@ -116,7 +116,7 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
             expect(typeof result.stdout).toBe("string");
             expect(typeof result.stderr).toBe("string");
             expect(result.stdout.length + result.stderr.length).toBeGreaterThan(
-                0
+                0,
             );
 
             const remaining = await ChildProcess("docker", [
@@ -130,6 +130,6 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
 
             expect(remaining.stdout.trim()).toBe("");
         },
-        15 * 60 * 1000
+        15 * 60 * 1000,
     );
 });

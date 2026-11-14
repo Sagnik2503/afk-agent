@@ -10,8 +10,18 @@ async function makeRepo(): Promise<string> {
     await ChildProcess("git", ["init", "-q"], { cwd: repo });
     await ChildProcess(
         "git",
-        ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "--allow-empty", "-m", "init"],
-        { cwd: repo }
+        [
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+        { cwd: repo },
     );
     return repo;
 }
@@ -25,8 +35,17 @@ describe("getChangedFiles", () => {
             await ChildProcess("git", ["add", "tracked.txt"], { cwd: repo });
             await ChildProcess(
                 "git",
-                ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "add tracked"],
-                { cwd: repo }
+                [
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "user.name=Test",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "add tracked",
+                ],
+                { cwd: repo },
             );
 
             await writeFile(join(repo, "tracked.txt"), "two");
@@ -48,10 +67,21 @@ describe("getChangedFiles", () => {
             await ChildProcess("git", ["add", "before.txt"], { cwd: repo });
             await ChildProcess(
                 "git",
-                ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "add before"],
-                { cwd: repo }
+                [
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "user.name=Test",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "add before",
+                ],
+                { cwd: repo },
             );
-            await ChildProcess("git", ["mv", "before.txt", "after.txt"], { cwd: repo });
+            await ChildProcess("git", ["mv", "before.txt", "after.txt"], {
+                cwd: repo,
+            });
 
             const files = await getChangedFiles(repo);
 
@@ -62,11 +92,13 @@ describe("getChangedFiles", () => {
     });
 
     it("throws when the path is not a git repository", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "afk-agent-changes-not-repo-"));
+        const directory = await mkdtemp(
+            join(tmpdir(), "afk-agent-changes-not-repo-"),
+        );
 
         try {
             await expect(getChangedFiles(directory)).rejects.toThrow(
-                /Git status failed/i
+                /Git status failed/i,
             );
         } finally {
             await rm(directory, { recursive: true, force: true });

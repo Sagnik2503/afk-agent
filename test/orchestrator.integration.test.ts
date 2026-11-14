@@ -33,10 +33,10 @@ process.exit(1);
 
 describe.skipIf(!dockerReady)("runTask integration", () => {
     const sourceDockerfile = fileURLToPath(
-        new URL("../Dockerfile", import.meta.url)
+        new URL("../Dockerfile", import.meta.url),
     );
     const sourceDockerignore = fileURLToPath(
-        new URL("../.dockerignore", import.meta.url)
+        new URL("../.dockerignore", import.meta.url),
     );
     const runTimeout = 10 * 60 * 1000;
     const taskId = `orchestrator-${process.pid}-${Date.now()}`;
@@ -50,7 +50,7 @@ describe.skipIf(!dockerReady)("runTask integration", () => {
 
     beforeAll(async () => {
         repo = await realpath(
-            await mkdtemp(join(tmpdir(), "afk-agent-orchestrator-"))
+            await mkdtemp(join(tmpdir(), "afk-agent-orchestrator-")),
         );
 
         await copyFile(sourceDockerfile, join(repo, "Dockerfile"));
@@ -60,7 +60,7 @@ describe.skipIf(!dockerReady)("runTask integration", () => {
             JSON.stringify({
                 name: "orchestrator-fixture",
                 scripts: { test: "node test.js" },
-            })
+            }),
         );
         await writeFile(join(repo, "test.js"), failOnceTest);
 
@@ -78,7 +78,7 @@ describe.skipIf(!dockerReady)("runTask integration", () => {
                 "-m",
                 "fixture",
             ],
-            { cwd: repo }
+            { cwd: repo },
         );
     }, 60_000);
 
@@ -106,7 +106,7 @@ describe.skipIf(!dockerReady)("runTask integration", () => {
             expect(result.error).toBeNull();
             expect(result.branchName).toBe(`afk/${taskId}`);
             expect(result.worktreePath).toBe(
-                join(repo, ".afk", "worktrees", taskId)
+                join(repo, ".afk", "worktrees", taskId),
             );
 
             expect(result.reports).toHaveLength(2);
@@ -124,10 +124,10 @@ describe.skipIf(!dockerReady)("runTask integration", () => {
             const branches = await ChildProcess(
                 "git",
                 ["branch", "--list", result.branchName],
-                { cwd: repo }
+                { cwd: repo },
             );
             expect(branches.stdout).toContain(result.branchName);
         },
-        25 * 60 * 1000
+        25 * 60 * 1000,
     );
 });

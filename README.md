@@ -144,12 +144,12 @@ It:
 
 The current retry policy is deliberately conservative:
 
-| Agent execution | Tests | Behaviour |
-|---|---|---|
-| Completed | Passed | Success |
-| Completed | Failed | Retry if attempts remain |
-| Crashed | Any result | Stop |
-| Timed out | Any result | Stop |
+| Agent execution | Tests      | Behaviour                |
+| --------------- | ---------- | ------------------------ |
+| Completed       | Passed     | Success                  |
+| Completed       | Failed     | Retry if attempts remain |
+| Crashed         | Any result | Stop                     |
+| Timed out       | Any result | Stop                     |
 
 The maximum number of attempts is three.
 
@@ -298,7 +298,7 @@ src/
 test/
 ```
 
-*The exact filenames should be kept in sync with the repository as the project evolves.*
+_The exact filenames should be kept in sync with the repository as the project evolves._
 
 ---
 
