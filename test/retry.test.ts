@@ -25,17 +25,16 @@ function testResult(overrides: Partial<TestResult> = {}): TestResult {
     };
 }
 
+type RunAgentFn = (worktreePath: string, prompt: string) => Promise<ProcessResult>;
+
 function makeDeps() {
     return {
-        runAgent: vi.fn(
-            async (_worktreePath: string, _prompt: string): Promise<ProcessResult> =>
-                agentResult()
-        ),
+        runAgent: vi.fn<RunAgentFn>(async () => agentResult()),
         runTests: vi.fn(
-            async (_worktreePath: string): Promise<TestResult> => testResult()
+            async (): Promise<TestResult> => testResult()
         ),
         getChangedFiles: vi.fn(
-            async (_worktreePath: string): Promise<string[]> => ["src/a.ts"]
+            async (): Promise<string[]> => ["src/a.ts"]
         ),
     };
 }

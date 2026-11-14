@@ -7,6 +7,9 @@
   "author": "",
   "type": "module",
   "main": "index.js",
+  "overrides": {
+    "minimatch": "^11.0.8"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
