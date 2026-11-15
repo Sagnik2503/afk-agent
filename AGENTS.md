@@ -13,3 +13,4 @@ It runs typecheck, lint, format check, and tests, in that order.
 
 - during grilling sessions, make sure the questions are easy to understand.
 - follow the questions with simple examples as to how it will work.
+- make me verify key decisions explicitly to ensure nothing is missed
