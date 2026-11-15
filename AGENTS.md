@@ -14,3 +14,17 @@ It runs typecheck, lint, format check, and tests, in that order.
 - during grilling sessions, make sure the questions are easy to understand.
 - follow the questions with simple examples as to how it will work.
 - make me verify key decisions explicitly to ensure nothing is missed
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo's GitHub Issues, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, using default label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
