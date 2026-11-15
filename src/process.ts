@@ -1,62 +1,69 @@
-import {spawn} from "node:child_process"
+import { spawn } from "node:child_process";
 
-export type ProcessResult={
-    stdout: string,
-    stderr: string,
-    exitCode: number | null,
+export type ProcessResult = {
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
     signal: NodeJS.Signals | null;
     timedOut: boolean;
-    outputTruncated: boolean
-}
-
-export type ProcessOptions = {
-  cwd?: string;
-  timeout?: number;
-  maxOutput?: number
+    outputTruncated: boolean;
 };
 
-export function ChildProcess(command: string, args: string[], options:ProcessOptions={}): Promise<ProcessResult> {
-    
-    return new Promise((resolve,reject)=>{
+export type ProcessOptions = {
+    cwd?: string;
+    timeout?: number;
+    maxOutput?: number;
+    env?: NodeJS.ProcessEnv;
+};
+
+export function ChildProcess(
+    command: string,
+    args: string[],
+    options: ProcessOptions = {},
+): Promise<ProcessResult> {
+    return new Promise((resolve, reject) => {
         const child = spawn(command, args, {
-        cwd: options.cwd,
-        stdio: ["ignore", "pipe", "pipe"], //input, output, error
-        detached: true
+            cwd: options.cwd,
+            stdio: ["ignore", "pipe", "pipe"], //input, output, error
+            detached: true,
+            ...(options.env ? { env: options.env } : {}),
         });
-        
-        let outputTruncated=false
-        let timedOut_flag=false
+
+        let outputTruncated = false;
+        let timedOut_flag = false;
         let stdout = "";
         let stderr = "";
         let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
         let capturedBytes = 0;
         const maxOutput = options.maxOutput ?? 1024 * 1024; //1MB (default) of shared output storage (stdout + stderr)
 
-        const timer=options.timeout?setTimeout(()=>{
-            timedOut_flag=true
-            if(child.pid!==undefined){
-                try{
-                    process.kill(-child.pid, "SIGTERM"); //process. targets the process grp whereas child. targets the child only
-                }catch {
-                child.kill("SIGTERM");
-              }
-            }
+        const timer = options.timeout
+            ? setTimeout(() => {
+                  timedOut_flag = true;
+                  if (child.pid !== undefined) {
+                      try {
+                          process.kill(-child.pid, "SIGTERM"); //process. targets the process grp whereas child. targets the child only
+                      } catch {
+                          child.kill("SIGTERM");
+                      }
+                  }
 
-            //give 5 seconds and kill the process instead of graceful shutdown
-            forceKillTimer=setTimeout(()=>{
-                if(child.pid===undefined)return;
-                try{
-                    process.kill(-child.pid,"SIGKILL")
-                }catch {
-                    child.kill("SIGKILL");
-                }
-            },5000)
+                  //give 5 seconds and kill the process instead of graceful shutdown
+                  forceKillTimer = setTimeout(() => {
+                      if (child.pid === undefined) return;
+                      try {
+                          process.kill(-child.pid, "SIGKILL");
+                      } catch {
+                          child.kill("SIGKILL");
+                      }
+                  }, 5000);
+              }, options.timeout)
+            : undefined;
 
-        },options.timeout):undefined
-
-        child.stdout?.on('data',(data:Buffer)=>{ //data arrives as byte streams
-            const remaining=maxOutput-capturedBytes
-            if(remaining<=0){
+        child.stdout?.on("data", (data: Buffer) => {
+            //data arrives as byte streams
+            const remaining = maxOutput - capturedBytes;
+            if (remaining <= 0) {
                 outputTruncated = true;
                 return;
             }
@@ -64,13 +71,13 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
             if (chunk.length < data.length) {
                 outputTruncated = true;
             }
-            stdout+=chunk.toString()
+            stdout += chunk.toString();
             capturedBytes += chunk.length;
-        })
+        });
 
         child.stderr?.on("data", (data: Buffer) => {
             const remaining = maxOutput - capturedBytes;
-            if(remaining<=0){
+            if (remaining <= 0) {
                 outputTruncated = true;
                 return;
             }
@@ -84,24 +91,23 @@ export function ChildProcess(command: string, args: string[], options:ProcessOpt
         });
 
         child.on("error", (error) => {
-        if (timer) clearTimeout(timer);
-        if (forceKillTimer) clearTimeout(forceKillTimer);
-        reject(error);
+            if (timer) clearTimeout(timer);
+            if (forceKillTimer) clearTimeout(forceKillTimer);
+            reject(error);
         });
 
         child.on("close", (exitCode, signal) => {
             if (timer) clearTimeout(timer);
-            if(forceKillTimer)clearTimeout(forceKillTimer)
+            if (forceKillTimer) clearTimeout(forceKillTimer);
 
             resolve({
                 stdout,
                 stderr,
                 exitCode,
                 signal,
-                timedOut:timedOut_flag,
-                outputTruncated: outputTruncated
+                timedOut: timedOut_flag,
+                outputTruncated: outputTruncated,
             });
         });
     });
 }
-    

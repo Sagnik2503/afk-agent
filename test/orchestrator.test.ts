@@ -8,9 +8,27 @@ import { runWithRetries } from "../src/harness/retry.js";
 import { runTests } from "../src/harness/validation.js";
 import { getChangedFiles } from "../src/harness/change.js";
 import { runTask } from "../src/harness/orchestrator.js";
+import {
+    buildIssueComment,
+    commitLeftovers,
+    getBaseRef,
+    getCommits,
+    postIssueComment,
+    pushBranch,
+} from "../src/github/sync.js";
+import type { GitHubIssue } from "../src/github/fetch_issues.js";
 
 vi.mock("../src/worktree/manager.js", () => ({
     setupWorktree: vi.fn(),
+}));
+
+vi.mock("../src/github/sync.js", () => ({
+    buildIssueComment: vi.fn(),
+    commitLeftovers: vi.fn(),
+    getBaseRef: vi.fn(),
+    getCommits: vi.fn(),
+    postIssueComment: vi.fn(),
+    pushBranch: vi.fn(),
 }));
 
 vi.mock("../src/agent/docker_runner.js", () => ({
@@ -24,6 +42,12 @@ vi.mock("../src/harness/retry.js", () => ({
 const mockedSetupWorktree = vi.mocked(setupWorktree);
 const mockedCreateDockerAgent = vi.mocked(createDockerAgent);
 const mockedRunWithRetries = vi.mocked(runWithRetries);
+const mockedBuildIssueComment = vi.mocked(buildIssueComment);
+const mockedCommitLeftovers = vi.mocked(commitLeftovers);
+const mockedGetBaseRef = vi.mocked(getBaseRef);
+const mockedGetCommits = vi.mocked(getCommits);
+const mockedPostIssueComment = vi.mocked(postIssueComment);
+const mockedPushBranch = vi.mocked(pushBranch);
 
 function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
     return {
@@ -39,9 +63,7 @@ function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
 
 const agent = {
     prepareImage: vi.fn(async () => {}),
-    run: vi.fn(
-        async (_prompt: string): Promise<ProcessResult> => processResult()
-    ),
+    run: vi.fn(async (): Promise<ProcessResult> => processResult()),
 };
 
 const input = {
@@ -51,8 +73,43 @@ const input = {
     prompt: "Fix the failing tests.",
 };
 
+const issue: GitHubIssue = {
+    number: 1,
+    owner: "test-owner",
+    repo: "test-repo",
+    title: "Fix the failing tests",
+    body: "",
+    url: "https://github.com/test-owner/test-repo/issues/1",
+};
+
 const branchName = "afk/task-1";
 const worktreePath = "/repo/.afk/worktrees/task-1";
+
+function report(overrides: Partial<HarnessReport> = {}): HarnessReport {
+    return {
+        taskId: "task-1",
+        executionStatus: "completed",
+        success: true,
+        testsPassed: true,
+        agentTimedOut: false,
+        changedFiles: ["src/slug.ts"],
+        reasons: [],
+        agent: {
+            stdout: "",
+            stderr: "",
+            exitCode: 0,
+            signal: null,
+            outputTruncated: false,
+        },
+        tests: {
+            passed: true,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+        },
+        ...overrides,
+    };
+}
 
 beforeEach(() => {
     mockedSetupWorktree.mockReset();
@@ -60,19 +117,39 @@ beforeEach(() => {
     mockedRunWithRetries.mockReset();
     agent.prepareImage.mockReset();
     agent.run.mockReset();
+    mockedBuildIssueComment.mockReset();
+    mockedCommitLeftovers.mockReset();
+    mockedGetBaseRef.mockReset();
+    mockedGetCommits.mockReset();
+    mockedPostIssueComment.mockReset();
+    mockedPushBranch.mockReset();
 
     agent.prepareImage.mockResolvedValue(undefined);
     agent.run.mockResolvedValue(processResult());
     mockedCreateDockerAgent.mockReturnValue(agent);
     mockedSetupWorktree.mockResolvedValue({ branchName, worktreePath });
     mockedRunWithRetries.mockResolvedValue({ reports: [], error: null });
+    mockedBuildIssueComment.mockReturnValue("comment body");
+    mockedCommitLeftovers.mockResolvedValue(false);
+    mockedGetBaseRef.mockResolvedValue("base-sha");
+    mockedGetCommits.mockResolvedValue([]);
+    mockedPostIssueComment.mockResolvedValue({
+        commented: true,
+        error: null,
+    });
+    mockedPushBranch.mockResolvedValue({
+        pushed: true,
+        branchUrl: "https://github.com/test-owner/test-repo/tree/afk/task-1",
+        reason: null,
+        baseRef: "base-sha",
+    });
 });
 
 describe("runTask", () => {
     it("rejects an empty prompt before touching the repo or Docker", async () => {
-        await expect(
-            runTask({ ...input, prompt: "   " })
-        ).rejects.toThrow("Prompt is required");
+        await expect(runTask({ ...input, prompt: "   " })).rejects.toThrow(
+            "Prompt is required",
+        );
 
         expect(mockedCreateDockerAgent).not.toHaveBeenCalled();
         expect(mockedSetupWorktree).not.toHaveBeenCalled();
@@ -83,7 +160,8 @@ describe("runTask", () => {
     it("creates the agent, worktree, and image before running retries", async () => {
         await runTask(input);
 
-        const createOrder = mockedCreateDockerAgent.mock.invocationCallOrder[0]!;
+        const createOrder =
+            mockedCreateDockerAgent.mock.invocationCallOrder[0]!;
         const setupOrder = mockedSetupWorktree.mock.invocationCallOrder[0]!;
         const imageOrder = agent.prepareImage.mock.invocationCallOrder[0]!;
         const retryOrder = mockedRunWithRetries.mock.invocationCallOrder[0]!;
@@ -105,7 +183,7 @@ describe("runTask", () => {
         });
         expect(mockedSetupWorktree).toHaveBeenCalledWith(
             resolved,
-            input.taskId
+            input.taskId,
         );
     });
 
@@ -136,7 +214,7 @@ describe("runTask", () => {
                 worktreePath,
                 prompt: input.prompt,
             },
-            expect.objectContaining({})
+            expect.objectContaining({}),
         );
 
         const deps = mockedRunWithRetries.mock.calls[0]?.[1];
@@ -177,13 +255,13 @@ describe("runTask", () => {
         expect(secondTaskId).toMatch(uuidPattern);
         expect(firstTaskId).not.toBe(secondTaskId);
         expect(mockedCreateDockerAgent.mock.calls[0]?.[0].taskId).toBe(
-            firstTaskId
+            firstTaskId,
         );
         expect(mockedCreateDockerAgent.mock.calls[0]?.[0].issueId).toBe(
-            withoutTaskId.issueId
+            withoutTaskId.issueId,
         );
         expect(mockedRunWithRetries.mock.calls[0]?.[0].taskId).toBe(
-            firstTaskId
+            firstTaskId,
         );
     });
 
@@ -201,12 +279,111 @@ describe("runTask", () => {
             worktreePath,
             reports,
             error: "tests exploded",
+            sync: null,
         });
+    });
+
+    it("commits leftovers, pushes, and comments when an issue is provided", async () => {
+        const reports = [report()];
+        mockedRunWithRetries.mockResolvedValue({ reports, error: null });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+
+        const result = await runTask({ ...input, issue });
+
+        expect(mockedCommitLeftovers).toHaveBeenCalledWith(
+            { worktreePath, taskId: input.taskId, attempt: 1 },
+            expect.anything(),
+        );
+        expect(mockedPushBranch).toHaveBeenCalledWith(
+            { worktreePath, branchName, issue },
+            expect.anything(),
+        );
+        expect(mockedPostIssueComment).toHaveBeenCalledWith(
+            { issue, body: "comment body" },
+            expect.anything(),
+        );
+        expect(result.sync).toEqual({
+            pushed: true,
+            branchUrl:
+                "https://github.com/test-owner/test-repo/tree/afk/task-1",
+            pushError: null,
+            commented: true,
+            commentError: null,
+        });
+    });
+
+    it("skips the push but still comments when push is disabled", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+
+        const result = await runTask({ ...input, issue, push: false });
+
+        expect(mockedPushBranch).not.toHaveBeenCalled();
+        expect(mockedBuildIssueComment).toHaveBeenCalledWith(
+            expect.objectContaining({
+                push: expect.objectContaining({
+                    pushed: false,
+                    reason: "push disabled",
+                }),
+            }),
+        );
+        expect(mockedPostIssueComment).toHaveBeenCalled();
+        expect(result.sync).toEqual({
+            pushed: false,
+            branchUrl: null,
+            pushError: "push disabled",
+            commented: true,
+            commentError: null,
+        });
+    });
+
+    it("reports a comment failure without failing the run", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+        mockedPostIssueComment.mockResolvedValue({
+            commented: false,
+            error: "gh: not authenticated",
+        });
+
+        const result = await runTask({ ...input, issue });
+
+        expect(result.error).toBeNull();
+        expect(result.sync?.commented).toBe(false);
+        expect(result.sync?.commentError).toBe("gh: not authenticated");
+    });
+
+    it("still syncs before rethrowing an agent-loop failure", async () => {
+        mockedRunWithRetries.mockRejectedValue(new Error("agent exploded"));
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "wip" },
+        ]);
+
+        await expect(runTask({ ...input, issue })).rejects.toThrow(
+            "agent exploded",
+        );
+
+        expect(mockedCommitLeftovers).toHaveBeenCalledWith(
+            { worktreePath, taskId: input.taskId, attempt: 0 },
+            expect.anything(),
+        );
+        expect(mockedPostIssueComment).toHaveBeenCalled();
     });
 
     it("throws when the worktree cannot be created and skips the image and retries", async () => {
         mockedSetupWorktree.mockRejectedValue(
-            new Error("Branch already exists: afk/task-1")
+            new Error("Branch already exists: afk/task-1"),
         );
 
         await expect(runTask(input)).rejects.toThrow("Branch already exists");
@@ -217,11 +394,11 @@ describe("runTask", () => {
 
     it("throws when the image build fails and skips retries", async () => {
         agent.prepareImage.mockRejectedValue(
-            new Error("Docker image build failed: no base image")
+            new Error("Docker image build failed: no base image"),
         );
 
         await expect(runTask(input)).rejects.toThrow(
-            "Docker image build failed"
+            "Docker image build failed",
         );
 
         expect(mockedRunWithRetries).not.toHaveBeenCalled();
