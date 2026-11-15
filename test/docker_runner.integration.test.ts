@@ -98,7 +98,7 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
                 { timeout: 60_000 },
             );
 
-            expect(git.exitCode).toBe(0);
+            expect(git.exitCode, `Git failed: ${git.stderr}`).toBe(0);
             expect(git.stdout.trim()).toBe(worktreePath);
 
             const started = Date.now();
