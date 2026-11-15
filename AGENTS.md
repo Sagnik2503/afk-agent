@@ -8,12 +8,19 @@ It runs typecheck, lint, format check, and tests, in that order.
   just to make a check pass.
 - Do not use `eslint-disable`, `@ts-ignore`, `.skip`, or `as any` to hide errors.
 - Run `npx prettier --write` on the files you changed to fix formatting.
+- After implementing a GitHub issue, always add implementation notes as a
+  comment on the issue (`gh issue comment`) and close it (`gh issue close`).
 
 ## Grilling Rules
 
-- during grilling sessions, make sure the questions are easy to understand.
-- follow the questions with simple examples as to how it will work.
-- make me verify key decisions explicitly to ensure nothing is missed
+- **Explain before asking:** Provide context for every question, including why it matters. Briefly explain technical terms when necessary.
+- **Break it down:** Ask clear, specific questions. Split complex or abstract questions into smaller, manageable parts.
+- **Give examples:** Include simple, practical examples to demonstrate what each question or decision means in practice.
+- **Explain the choices:** Present available options, their trade-offs, and recommend an approach when appropriate.
+- **Verify decisions:** Explicitly summarize and confirm important decisions before proceeding. Never assume approval.
+- **Minimize back-and-forth:** Anticipate follow-up questions, address ambiguities upfront, and maintain a summary of agreed decisions.
+
+**Core principle:** Never make the user guess what you're asking. Make every question easy to understand and answer without requiring multiple rounds of clarification.
 
 ## Agent skills
 
