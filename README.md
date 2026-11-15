@@ -276,19 +276,19 @@ The main checkout remains separate from the agent's working directory.
 ```text
 src/
 ├── agent/
-│   ├── docker-runner.ts
+│   ├── docker_runner.ts
 │   └── prompt.ts
 ├── github/
-│   └── fetch-issues.ts
+│   ├── fetch_issues.ts
+│   ├── repo_validation.ts
+│   └── sync.ts
 ├── harness/
-│   ├── changes.ts
+│   ├── change.ts
 │   ├── orchestrator.ts
 │   ├── report.ts
 │   ├── result.ts
 │   ├── retry.ts
 │   └── validation.ts
-├── validation/
-│   └── repository.ts
 ├── worktree/
 │   └── manager.ts
 ├── process.ts
@@ -297,8 +297,6 @@ src/
 
 test/
 ```
-
-_The exact filenames should be kept in sync with the repository as the project evolves._
 
 ---
 
@@ -319,7 +317,6 @@ Currently, the focus is on:
 Future capabilities include:
 
 - Structured implementation summaries.
-- Automated commits and branch pushing.
 - GitHub pull request creation after successful validation.
 - Better execution monitoring and recovery.
 - More granular sandbox permissions and network controls.
