@@ -5,6 +5,16 @@ export const DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free";
 export const DEFAULT_IMAGE = "afk-agent:latest";
 export const DEFAULT_TIMEOUT = 10 * 60 * 1000;
 const CLEANUP_TIMEOUT = 10_000;
+const GIT_ENV = [
+    "GIT_AUTHOR_NAME=afk-agent",
+    "GIT_AUTHOR_EMAIL=afk-agent@localhost",
+    "GIT_COMMITTER_NAME=afk-agent",
+    "GIT_COMMITTER_EMAIL=afk-agent@localhost",
+    // The bind-mounted worktree is owned by the host user, not the node user.
+    "GIT_CONFIG_COUNT=1",
+    "GIT_CONFIG_KEY_0=safe.directory",
+    "GIT_CONFIG_VALUE_0=*",
+];
 
 export type DockerAgentOptions = {
     repoPath: string;
@@ -36,7 +46,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
         repoPath,
         ".afk",
         "worktrees",
-        options.taskId
+        options.taskId,
     );
 
     const gitDir = path.resolve(repoPath, ".git");
@@ -53,7 +63,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
         const result = await ChildProcess(
             "docker",
             ["rm", "-f", containerName],
-            { timeout: CLEANUP_TIMEOUT }
+            { timeout: CLEANUP_TIMEOUT },
         );
 
         if (
@@ -61,7 +71,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
             !result.stderr.includes("No such container")
         ) {
             throw new Error(
-                `Docker container removal failed: ${result.stderr}`
+                `Docker container removal failed: ${result.stderr}`,
             );
         }
     }
@@ -70,7 +80,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
         const inspected = await ChildProcess(
             "docker",
             ["image", "inspect", imageName],
-            { timeout }
+            { timeout },
         );
 
         if (inspected.exitCode === 0) {
@@ -79,36 +89,36 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
 
         if (inspected.timedOut) {
             throw new Error(
-                `Docker image inspection timed out: ${inspected.stderr}`
+                `Docker image inspection timed out: ${inspected.stderr}`,
             );
         }
 
         if (!inspected.stderr.includes("No such image")) {
             throw new Error(
-                `Docker image inspection failed: ${inspected.stderr}`
+                `Docker image inspection failed: ${inspected.stderr}`,
             );
         }
 
         const build = await ChildProcess(
             "docker",
             ["build", "-t", imageName, "-f", dockerfilePath, repoPath],
-            { timeout }
+            { timeout },
         );
 
         if (build.timedOut || build.exitCode !== 0) {
-            throw new Error(
-                `Docker image build failed: ${build.stderr}`
-            );
+            throw new Error(`Docker image build failed: ${build.stderr}`);
         }
     }
 
     async function run(prompt: string): Promise<ProcessResult> {
         await removeContainer();
 
+        let result: ProcessResult | undefined;
         let executionError: unknown;
+        let cleanupError: unknown;
 
         try {
-            return await ChildProcess(
+            result = await ChildProcess(
                 "docker",
                 [
                     "run",
@@ -126,6 +136,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
                     `AFK_TASK_ID=${options.taskId}`,
                     "-e",
                     `AFK_ISSUE_ID=${options.issueId}`,
+                    ...GIT_ENV.flatMap((value) => ["-e", value]),
                     imageName,
                     "opencode",
                     "run",
@@ -135,20 +146,27 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
                     model,
                     prompt,
                 ],
-                { timeout }
+                { timeout },
             );
         } catch (error) {
             executionError = error;
-            throw error;
         } finally {
             try {
                 await removeContainer();
-            } catch (cleanupError) {
-                if (executionError === undefined) {
-                    throw cleanupError;
-                }
+            } catch (error) {
+                cleanupError = error;
             }
         }
+
+        if (executionError !== undefined) {
+            throw executionError;
+        }
+
+        if (cleanupError !== undefined) {
+            throw cleanupError;
+        }
+
+        return result!;
     }
 
     return { prepareImage, run };
