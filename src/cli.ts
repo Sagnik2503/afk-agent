@@ -47,7 +47,15 @@ program
 
             console.log("\n--- AFK Agent Report ---");
             console.log("Branch:", result.branchName);
-            console.log("Worktree:", result.worktreePath);
+            console.log(
+                "Worktree:",
+                result.worktreeRemoved
+                    ? "removed (branch kept)"
+                    : result.worktreePath,
+            );
+            if (result.cleanupError) {
+                console.error("Worktree cleanup failed:", result.cleanupError);
+            }
             console.log("Attempts:", result.reports.length);
 
             if (result.sync) {

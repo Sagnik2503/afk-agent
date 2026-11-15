@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, rm, access, realpath } from "node:fs/promises";
+import { mkdtemp, rm, access, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -94,6 +94,23 @@ describe("removeWorktree", () => {
                 removeWorktree(repo, join(repo, "no-such-worktree")),
             ).rejects.toThrow(/worktree removal failed/i);
         } finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+
+    it("force-removes a worktree with untracked changes", async () => {
+        const repo = await makeRepo();
+        const worktree = join(repo, "..", `afk-agent-wt-${Date.now()}`);
+
+        try {
+            await createWorktree(repo, "dirty", worktree);
+            await writeFile(join(worktree, "leftover.txt"), "scratch");
+
+            await removeWorktree(repo, worktree, { force: true });
+
+            await expect(access(worktree)).rejects.toThrow();
+        } finally {
+            await rm(worktree, { recursive: true, force: true });
             await rm(repo, { recursive: true, force: true });
         }
     });
@@ -202,16 +219,40 @@ describe("setupWorktree", () => {
         }
     });
 
-    it("fails when a worktree already exists for the task", async () => {
+    it("reclaims a stale worktree and re-attaches its branch", async () => {
         const repo = await makeRepo();
         const taskId = `task-${Date.now()}`;
 
         try {
-            await setupWorktree(repo, taskId);
-
-            await expect(setupWorktree(repo, taskId)).rejects.toThrow(
-                /already exists for task/i,
+            const first = await setupWorktree(repo, taskId);
+            await ChildProcess(
+                "git",
+                [
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "user.name=Test",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "keep me",
+                ],
+                { cwd: first.worktreePath },
             );
+
+            const second = await setupWorktree(repo, taskId);
+
+            expect(second.branchName).toBe(`afk/${taskId}`);
+            expect(second.worktreePath).toBe(first.worktreePath);
+            await expect(access(second.worktreePath)).resolves.toBeUndefined();
+
+            const log = await ChildProcess(
+                "git",
+                ["log", "-1", "--format=%s"],
+                { cwd: second.worktreePath },
+            );
+            expect(log.stdout.trim()).toBe("keep me");
         } finally {
             await rm(repo, { recursive: true, force: true });
         }

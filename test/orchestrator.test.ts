@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import path from "node:path";
 import type { ProcessResult } from "../src/process.js";
 import type { HarnessReport } from "../src/harness/report.js";
-import { setupWorktree } from "../src/worktree/manager.js";
+import { removeWorktree, setupWorktree } from "../src/worktree/manager.js";
 import { createDockerAgent } from "../src/agent/docker_runner.js";
 import { runWithRetries } from "../src/harness/retry.js";
 import { runTests } from "../src/harness/validation.js";
@@ -20,6 +20,7 @@ import type { GitHubIssue } from "../src/github/fetch_issues.js";
 
 vi.mock("../src/worktree/manager.js", () => ({
     setupWorktree: vi.fn(),
+    removeWorktree: vi.fn(),
 }));
 
 vi.mock("../src/github/sync.js", () => ({
@@ -40,6 +41,7 @@ vi.mock("../src/harness/retry.js", () => ({
 }));
 
 const mockedSetupWorktree = vi.mocked(setupWorktree);
+const mockedRemoveWorktree = vi.mocked(removeWorktree);
 const mockedCreateDockerAgent = vi.mocked(createDockerAgent);
 const mockedRunWithRetries = vi.mocked(runWithRetries);
 const mockedBuildIssueComment = vi.mocked(buildIssueComment);
@@ -113,6 +115,7 @@ function report(overrides: Partial<HarnessReport> = {}): HarnessReport {
 
 beforeEach(() => {
     mockedSetupWorktree.mockReset();
+    mockedRemoveWorktree.mockReset();
     mockedCreateDockerAgent.mockReset();
     mockedRunWithRetries.mockReset();
     agent.prepareImage.mockReset();
@@ -128,6 +131,7 @@ beforeEach(() => {
     agent.run.mockResolvedValue(processResult());
     mockedCreateDockerAgent.mockReturnValue(agent);
     mockedSetupWorktree.mockResolvedValue({ branchName, worktreePath });
+    mockedRemoveWorktree.mockResolvedValue(undefined);
     mockedRunWithRetries.mockResolvedValue({ reports: [], error: null });
     mockedBuildIssueComment.mockReturnValue("comment body");
     mockedCommitLeftovers.mockResolvedValue(false);
@@ -280,7 +284,92 @@ describe("runTask", () => {
             reports,
             error: "tests exploded",
             sync: null,
+            worktreeRemoved: true,
+            cleanupError: null,
         });
+    });
+
+    it("commits leftovers and removes the worktree when the task fails", async () => {
+        const reports = [report({ success: false })];
+        mockedRunWithRetries.mockResolvedValue({
+            reports,
+            error: null,
+        });
+
+        const result = await runTask(input);
+
+        expect(mockedCommitLeftovers).toHaveBeenCalledWith(
+            { worktreePath, taskId: input.taskId, attempt: 1 },
+            expect.anything(),
+        );
+        expect(mockedRemoveWorktree).toHaveBeenCalledWith(
+            "/repo",
+            worktreePath,
+            { force: true },
+        );
+        expect(result.worktreeRemoved).toBe(true);
+        expect(result.cleanupError).toBeNull();
+    });
+
+    it("keeps the worktree when the task succeeds", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+
+        const result = await runTask(input);
+
+        expect(mockedRemoveWorktree).not.toHaveBeenCalled();
+        expect(result.worktreeRemoved).toBe(false);
+        expect(result.cleanupError).toBeNull();
+    });
+
+    it("removes the worktree after a failed push and keeps the branch", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report({ success: false })],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "wip" },
+        ]);
+        mockedPushBranch.mockResolvedValue({
+            pushed: false,
+            branchUrl: null,
+            reason: "refusing to push secret-like files: .env",
+            baseRef: "base-sha",
+        });
+
+        const result = await runTask({ ...input, issue });
+
+        expect(result.sync?.pushed).toBe(false);
+        expect(mockedRemoveWorktree).toHaveBeenCalledWith(
+            "/repo",
+            worktreePath,
+            { force: true },
+        );
+        expect(result.worktreeRemoved).toBe(true);
+    });
+
+    it("does not remove the worktree when setup fails", async () => {
+        mockedSetupWorktree.mockRejectedValue(new Error("setup exploded"));
+
+        await expect(runTask(input)).rejects.toThrow("setup exploded");
+
+        expect(mockedRemoveWorktree).not.toHaveBeenCalled();
+    });
+
+    it("reports a cleanup failure without masking the task failure", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report({ success: false })],
+            error: null,
+        });
+        mockedRemoveWorktree.mockRejectedValue(new Error("busy"));
+
+        const result = await runTask(input);
+
+        expect(result.error).toBeNull();
+        expect(result.worktreeRemoved).toBe(false);
+        expect(result.cleanupError).toBe("busy");
     });
 
     it("commits leftovers, pushes, and comments when an issue is provided", async () => {
@@ -379,6 +468,11 @@ describe("runTask", () => {
             expect.anything(),
         );
         expect(mockedPostIssueComment).toHaveBeenCalled();
+        expect(mockedRemoveWorktree).toHaveBeenCalledWith(
+            "/repo",
+            worktreePath,
+            { force: true },
+        );
     });
 
     it("throws when the worktree cannot be created and skips the image and retries", async () => {
@@ -390,6 +484,7 @@ describe("runTask", () => {
 
         expect(agent.prepareImage).not.toHaveBeenCalled();
         expect(mockedRunWithRetries).not.toHaveBeenCalled();
+        expect(mockedRemoveWorktree).not.toHaveBeenCalled();
     });
 
     it("throws when the image build fails and skips retries", async () => {
@@ -402,5 +497,21 @@ describe("runTask", () => {
         );
 
         expect(mockedRunWithRetries).not.toHaveBeenCalled();
+        expect(mockedRemoveWorktree).toHaveBeenCalledWith(
+            "/repo",
+            worktreePath,
+            { force: true },
+        );
+    });
+
+    it("removes the worktree once after all retries fail", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report({ success: false }), report({ success: false })],
+            error: null,
+        });
+
+        await runTask(input);
+
+        expect(mockedRemoveWorktree).toHaveBeenCalledTimes(1);
     });
 });

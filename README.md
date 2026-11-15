@@ -96,8 +96,13 @@ This means:
 
 - The agent can modify files without changing your main checkout.
 - Multiple tasks can run independently.
-- Changes remain available for review after execution.
+- On success, the worktree remains available for review.
 - You can inspect, diff, merge, or discard the resulting branch.
+
+A worktree is disposable scratch space; the branch is the durable record. On
+failure, AFK Agent commits any leftover changes to the branch, removes the
+worktree, and keeps the branch. Re-running the same issue reclaims any stale
+worktree automatically.
 
 The worktree lifecycle lives in `src/worktree/manager.ts`.
 
@@ -218,7 +223,8 @@ AFK Agent will:
 7. Run tests and retries.
 8. Commit any leftover changes.
 9. Push the branch and comment on the issue.
-10. Print the final execution report.
+10. Remove the worktree if the task failed, keeping the branch.
+11. Print the final execution report.
 
 Pass `--no-push` to keep the branch local. The issue comment is still posted.
 
@@ -226,9 +232,8 @@ Pass `--no-push` to keep the branch local. The issue comment is still posted.
 
 ## What happens after execution?
 
-The agent's changes are preserved in its worktree.
-
-For example:
+The branch is preserved. On success, the worktree is preserved too, so you can
+review the result in place:
 
 ```text
 your-repo/
@@ -248,14 +253,19 @@ The corresponding branch is:
 afk/<task-id>
 ```
 
+On failure, AFK Agent commits any leftover changes to the branch with a
+`wip(afk)` commit when possible, then removes the worktree. Any committed work
+survives on the branch. Uncommitted changes are discarded when they cannot be
+committed; reclaiming a stale worktree does not attempt to commit them.
+
 On success or failure, AFK Agent pushes that branch to `origin` and posts a
 comment on the issue with the branch link, commit list, test result, and any
 remaining problems. The push is refused when the branch is not under `afk/`,
 when `origin` does not match the issue's repository, when the branch would
 need a force-push, or when a changed file looks like a secret (for example
-`.env`, `*.pem`, or `id_rsa`).
+`.env`, `*.pem`, or `id_rsa`). A refused push does not block worktree cleanup.
 
-You can inspect the changes with:
+When the worktree is kept, you can inspect the changes with:
 
 ```bash
 git -C .afk/worktrees/<task-id> status
@@ -265,6 +275,12 @@ Or inspect the diff:
 
 ```bash
 git -C .afk/worktrees/<task-id> diff
+```
+
+For any run, you can inspect the branch:
+
+```bash
+git log afk/<task-id>
 ```
 
 The main checkout remains separate from the agent's working directory.

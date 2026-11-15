@@ -46,12 +46,34 @@ describe("setupWorktree integration", () => {
         expect(worktrees).toContain(await realpath(result.worktreePath));
     });
 
-    it("fails when called twice with the same task ID", async () => {
-        await setupWorktree(repo, "task-123");
-
-        await expect(setupWorktree(repo, "task-123")).rejects.toThrow(
-            /already exists for task/i,
+    it("reclaims a stale worktree and keeps its branch commits", async () => {
+        const first = await setupWorktree(repo, "task-123");
+        await ChildProcess(
+            "git",
+            [
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "survives reclaim",
+            ],
+            { cwd: first.worktreePath },
         );
+
+        const second = await setupWorktree(repo, "task-123");
+
+        expect(second.branchName).toBe("afk/task-123");
+        expect(second.worktreePath).toBe(first.worktreePath);
+        await expect(access(second.worktreePath)).resolves.toBeUndefined();
+
+        const log = await ChildProcess("git", ["log", "-1", "--format=%s"], {
+            cwd: second.worktreePath,
+        });
+        expect(log.stdout.trim()).toBe("survives reclaim");
     });
 
     it("fails for an invalid task ID such as ../test", async () => {

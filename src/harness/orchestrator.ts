@@ -4,7 +4,7 @@ import {
     createDockerAgent,
     type DockerAgentOptions,
 } from "../agent/docker_runner.js";
-import { setupWorktree } from "../worktree/manager.js";
+import { removeWorktree, setupWorktree } from "../worktree/manager.js";
 import {
     buildIssueComment,
     commitLeftovers,
@@ -51,10 +51,67 @@ export type RunTaskResult = {
     reports: HarnessReport[];
     error: string | null;
     sync: SyncInfo | null;
+    worktreeRemoved: boolean;
+    cleanupError: string | null;
 };
 
 function getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function isSuccess(reports: HarnessReport[], error: string | null): boolean {
+    return reports.at(-1)?.success === true && error === null;
+}
+
+async function disposeWorktree(
+    input: {
+        repoPath: string;
+        worktreePath: string;
+        taskId: string;
+        attempt: number;
+    },
+    deps: RunTaskDependencies,
+): Promise<{ removed: boolean; error: string | null }> {
+    let commitError: string | null = null;
+
+    try {
+        await commitLeftovers(
+            {
+                worktreePath: input.worktreePath,
+                taskId: input.taskId,
+                attempt: input.attempt,
+            },
+            deps,
+        );
+    } catch (error) {
+        commitError = getErrorMessage(error);
+    }
+
+    try {
+        await removeWorktree(input.repoPath, input.worktreePath, {
+            force: true,
+        });
+        return { removed: true, error: commitError };
+    } catch (error) {
+        const removalError = getErrorMessage(error);
+        return {
+            removed: false,
+            error: commitError
+                ? `${commitError}; ${removalError}`
+                : removalError,
+        };
+    }
+}
+
+async function disposeAfterFailure(
+    input: Parameters<typeof disposeWorktree>[0],
+    deps: RunTaskDependencies,
+): Promise<void> {
+    const { error } = await disposeWorktree(input, deps);
+
+    if (error) {
+        console.error("Worktree cleanup failed:", error);
+    }
 }
 
 async function syncAfterRun(
@@ -70,7 +127,7 @@ async function syncAfterRun(
     deps: RunTaskDependencies,
 ): Promise<SyncInfo> {
     const lastReport = input.reports.at(-1);
-    const success = lastReport?.success === true && input.error === null;
+    const success = isSuccess(input.reports, input.error);
 
     await commitLeftovers(
         {
@@ -183,7 +240,15 @@ export async function runTask(
 
     const { branchName, worktreePath } = await setupWorktree(repoPath, taskId);
 
-    await agent.prepareImage();
+    try {
+        await agent.prepareImage();
+    } catch (error) {
+        await disposeAfterFailure(
+            { repoPath, worktreePath, taskId, attempt: 0 },
+            deps,
+        );
+        throw error;
+    }
 
     const syncInput = {
         worktreePath,
@@ -219,6 +284,12 @@ export async function runTask(
                 deps,
             );
         }
+
+        await disposeAfterFailure(
+            { repoPath, worktreePath, taskId, attempt: 0 },
+            deps,
+        );
+
         throw error;
     }
 
@@ -235,11 +306,30 @@ export async function runTask(
               )
             : null;
 
+    let worktreeRemoved = false;
+    let cleanupError: string | null = null;
+
+    if (!isSuccess(retryResult.reports, retryResult.error)) {
+        const cleanup = await disposeWorktree(
+            {
+                repoPath,
+                worktreePath,
+                taskId,
+                attempt: retryResult.reports.length,
+            },
+            deps,
+        );
+        worktreeRemoved = cleanup.removed;
+        cleanupError = cleanup.error;
+    }
+
     return {
         branchName,
         worktreePath,
         reports: retryResult.reports,
         error: retryResult.error,
         sync,
+        worktreeRemoved,
+        cleanupError,
     };
 }

@@ -80,15 +80,22 @@ export async function listWorktrees(repoPath: string): Promise<string[]> {
         .map((line) => line.slice("worktree ".length).trim());
 }
 
+export type RemoveWorktreeOptions = {
+    force?: boolean;
+};
+
 export async function removeWorktree(
     repoPath: string,
     worktreePath: string,
+    options: RemoveWorktreeOptions = {},
 ): Promise<void> {
-    const child = await ChildProcess(
-        "git",
-        ["worktree", "remove", worktreePath],
-        { cwd: repoPath },
-    );
+    const args = ["worktree", "remove"];
+    if (options.force) {
+        args.push("--force");
+    }
+    args.push(worktreePath);
+
+    const child = await ChildProcess("git", args, { cwd: repoPath });
 
     if (child.exitCode !== 0) {
         throw new Error(`Git worktree removal failed: ${child.stderr}`);
@@ -120,7 +127,7 @@ export async function setupWorktree(
     );
 
     if (existingWorktrees.includes(resolvedWorktreePath)) {
-        throw new Error(`Worktree already exists for task: ${taskId}`);
+        await removeWorktree(repoPath, resolvedWorktreePath, { force: true });
     }
 
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
