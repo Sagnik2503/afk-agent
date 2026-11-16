@@ -38,6 +38,10 @@ export type CommentInput = {
     testsPassed: boolean;
     changedFiles: number;
     reasons: string[];
+    pr?: {
+        url: string | null;
+        error: string | null;
+    };
 };
 
 const AFK_BRANCH = /^afk\//;
@@ -57,7 +61,7 @@ const SECRET_PATTERNS = [
     /\.pfx$/,
 ];
 
-function firstLine(text: string): string {
+export function firstLine(text: string): string {
     return (
         text
             .split("\n")
@@ -85,6 +89,25 @@ function parseGitHubRemote(
 export function isSecretFile(filePath: string): boolean {
     const name = filePath.slice(filePath.lastIndexOf("/") + 1);
     return SECRET_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+export function formatCommitLines(
+    commits: CommitInfo[],
+    issue: IssueLocation,
+): string[] {
+    const lines = commits
+        .slice(0, MAX_COMMITS)
+        .map(
+            (commit) =>
+                `- [\`${commit.sha.slice(0, 7)}\`](https://github.com/${issue.owner}/${issue.repo}/commit/${commit.sha}) ${commit.subject}`,
+        );
+
+    const remaining = commits.length - MAX_COMMITS;
+    if (remaining > 0) {
+        lines.push(`- ... and ${remaining} more`);
+    }
+
+    return lines;
 }
 
 export async function getBaseRef(
@@ -297,20 +320,17 @@ export function buildIssueComment(input: CommentInput): string {
         );
     }
 
+    if (input.pr?.url) {
+        lines.push(`PR: ${input.pr.url}`);
+    } else if (input.pr?.error) {
+        lines.push(`PR: not created (${input.pr.error})`);
+    }
+
     if (input.commits.length === 0) {
         lines.push("Commits: none");
     } else {
         lines.push("Commits:");
-        for (const commit of input.commits.slice(0, MAX_COMMITS)) {
-            lines.push(
-                `- [\`${commit.sha.slice(0, 7)}\`](https://github.com/${input.issue.owner}/${input.issue.repo}/commit/${commit.sha}) ${commit.subject}`,
-            );
-        }
-
-        const remaining = input.commits.length - MAX_COMMITS;
-        if (remaining > 0) {
-            lines.push(`- ... and ${remaining} more`);
-        }
+        lines.push(...formatCommitLines(input.commits, input.issue));
     }
 
     lines.push(

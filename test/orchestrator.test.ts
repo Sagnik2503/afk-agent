@@ -16,6 +16,11 @@ import {
     postIssueComment,
     pushBranch,
 } from "../src/github/sync.js";
+import {
+    buildPullRequestBody,
+    openPullRequest,
+    resolveBaseBranch,
+} from "../src/github/pull_request.js";
 import type { GitHubIssue } from "../src/github/fetch_issues.js";
 
 vi.mock("../src/worktree/manager.js", () => ({
@@ -30,6 +35,12 @@ vi.mock("../src/github/sync.js", () => ({
     getCommits: vi.fn(),
     postIssueComment: vi.fn(),
     pushBranch: vi.fn(),
+}));
+
+vi.mock("../src/github/pull_request.js", () => ({
+    buildPullRequestBody: vi.fn(),
+    openPullRequest: vi.fn(),
+    resolveBaseBranch: vi.fn(),
 }));
 
 vi.mock("../src/agent/docker_runner.js", () => ({
@@ -50,6 +61,9 @@ const mockedGetBaseRef = vi.mocked(getBaseRef);
 const mockedGetCommits = vi.mocked(getCommits);
 const mockedPostIssueComment = vi.mocked(postIssueComment);
 const mockedPushBranch = vi.mocked(pushBranch);
+const mockedBuildPullRequestBody = vi.mocked(buildPullRequestBody);
+const mockedOpenPullRequest = vi.mocked(openPullRequest);
+const mockedResolveBaseBranch = vi.mocked(resolveBaseBranch);
 
 function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
     return {
@@ -126,6 +140,9 @@ beforeEach(() => {
     mockedGetCommits.mockReset();
     mockedPostIssueComment.mockReset();
     mockedPushBranch.mockReset();
+    mockedBuildPullRequestBody.mockReset();
+    mockedOpenPullRequest.mockReset();
+    mockedResolveBaseBranch.mockReset();
 
     agent.prepareImage.mockResolvedValue(undefined);
     agent.run.mockResolvedValue(processResult());
@@ -146,6 +163,14 @@ beforeEach(() => {
         branchUrl: "https://github.com/test-owner/test-repo/tree/afk/task-1",
         reason: null,
         baseRef: "base-sha",
+    });
+    mockedBuildPullRequestBody.mockReturnValue("pull request body");
+    mockedResolveBaseBranch.mockResolvedValue("main");
+    mockedOpenPullRequest.mockResolvedValue({
+        created: true,
+        reused: false,
+        url: "https://github.com/test-owner/test-repo/pull/7",
+        error: null,
     });
 });
 
@@ -400,6 +425,10 @@ describe("runTask", () => {
             pushError: null,
             commented: true,
             commentError: null,
+            prUrl: "https://github.com/test-owner/test-repo/pull/7",
+            prCreated: true,
+            prReused: false,
+            prError: null,
         });
     });
 
@@ -415,6 +444,7 @@ describe("runTask", () => {
         const result = await runTask({ ...input, issue, push: false });
 
         expect(mockedPushBranch).not.toHaveBeenCalled();
+        expect(mockedOpenPullRequest).not.toHaveBeenCalled();
         expect(mockedBuildIssueComment).toHaveBeenCalledWith(
             expect.objectContaining({
                 push: expect.objectContaining({
@@ -430,7 +460,159 @@ describe("runTask", () => {
             pushError: "push disabled",
             commented: true,
             commentError: null,
+            prUrl: null,
+            prCreated: false,
+            prReused: false,
+            prError: null,
         });
+    });
+
+    it("opens a pull request before commenting after a successful push", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+
+        await runTask({ ...input, issue });
+
+        expect(mockedResolveBaseBranch).toHaveBeenCalledWith(
+            worktreePath,
+            undefined,
+        );
+        expect(mockedBuildPullRequestBody).toHaveBeenCalledWith({
+            issue,
+            taskId: input.taskId,
+            attempts: 1,
+            testsPassed: true,
+            changedFiles: 1,
+            commits: [{ sha: "abc1234", subject: "feat(slug): add helper" }],
+        });
+        expect(mockedOpenPullRequest).toHaveBeenCalledWith(
+            {
+                worktreePath,
+                branchName,
+                issue,
+                baseBranch: "main",
+                title: issue.title,
+                body: "pull request body",
+                rerunComment:
+                    "AFK re-run: attempt 1, tests passing, 1 files changed.",
+            },
+            expect.anything(),
+        );
+
+        const pushOrder = mockedPushBranch.mock.invocationCallOrder[0]!;
+        const prOrder = mockedOpenPullRequest.mock.invocationCallOrder[0]!;
+        const commentOrder =
+            mockedPostIssueComment.mock.invocationCallOrder[0]!;
+        expect(pushOrder).toBeLessThan(prOrder);
+        expect(prOrder).toBeLessThan(commentOrder);
+    });
+
+    it("skips the pull request when pr is disabled", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+
+        const result = await runTask({ ...input, issue, pr: false });
+
+        expect(mockedOpenPullRequest).not.toHaveBeenCalled();
+        expect(result.sync?.prUrl).toBeNull();
+        expect(result.sync?.prCreated).toBe(false);
+        expect(result.sync?.prReused).toBe(false);
+        expect(result.sync?.prError).toBeNull();
+    });
+
+    it("skips the pull request when the run failed even if the branch was pushed", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report({ success: false })],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "wip" },
+        ]);
+
+        const result = await runTask({ ...input, issue });
+
+        expect(mockedPushBranch).toHaveBeenCalled();
+        expect(mockedOpenPullRequest).not.toHaveBeenCalled();
+        expect(result.sync?.prUrl).toBeNull();
+    });
+
+    it("skips the pull request when there are no commits", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([]);
+
+        const result = await runTask({ ...input, issue });
+
+        expect(mockedPushBranch).not.toHaveBeenCalled();
+        expect(mockedOpenPullRequest).not.toHaveBeenCalled();
+        expect(result.sync?.prUrl).toBeNull();
+    });
+
+    it("reuses an existing pull request and reports it", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+        mockedOpenPullRequest.mockResolvedValue({
+            created: false,
+            reused: true,
+            url: "https://github.com/test-owner/test-repo/pull/3",
+            error: null,
+        });
+
+        const result = await runTask({ ...input, issue });
+
+        expect(result.sync).toEqual(
+            expect.objectContaining({
+                prUrl: "https://github.com/test-owner/test-repo/pull/3",
+                prCreated: false,
+                prReused: true,
+                prError: null,
+            }),
+        );
+    });
+
+    it("reports a pull request failure without failing the run", async () => {
+        mockedRunWithRetries.mockResolvedValue({
+            reports: [report()],
+            error: null,
+        });
+        mockedGetCommits.mockResolvedValue([
+            { sha: "abc1234", subject: "feat(slug): add helper" },
+        ]);
+        mockedOpenPullRequest.mockResolvedValue({
+            created: false,
+            reused: false,
+            url: null,
+            error: "gh: not authenticated",
+        });
+
+        const result = await runTask({ ...input, issue });
+
+        expect(result.error).toBeNull();
+        expect(result.worktreeRemoved).toBe(false);
+        expect(mockedRemoveWorktree).not.toHaveBeenCalled();
+        expect(result.sync?.prError).toBe("gh: not authenticated");
+        expect(mockedBuildIssueComment).toHaveBeenCalledWith(
+            expect.objectContaining({
+                pr: { url: null, error: "gh: not authenticated" },
+            }),
+        );
     });
 
     it("reports a comment failure without failing the run", async () => {

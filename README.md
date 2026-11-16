@@ -4,7 +4,7 @@
 
 AFK Agent is an autonomous coding agent runner that lets you delegate software development tasks without babysitting the process.
 
-Give it a GitHub issue. AFK Agent creates an isolated Git worktree, starts a Docker sandbox, and runs an AI coding agent inside it. It validates the changes, retries when appropriate, and leaves you with a branch and execution report to review.
+Give it a GitHub issue. AFK Agent creates an isolated Git worktree, starts a Docker sandbox, and runs an AI coding agent inside it. It validates the changes, retries when appropriate, and leaves you with a branch, a pull request on success, and an execution report to review.
 
 The goal is simple: **come back to code you can review, not a terminal you have to untangle.**
 
@@ -48,20 +48,26 @@ AFK Agent orchestrates the entire execution lifecycle.
                       |
                       v
                 Run Tests
-                      |
-               +------+------+
-               |             |
-             Pass           Fail
-               |             |
-               |       Retry if allowed
-               |             |
-               +------+------+
-                      |
-                      v
-                Final Report
-                      |
-                      v
-             Branch ready for review
+                       |
+                +------+------+
+                |             |
+              Pass           Fail
+                |             |
+                |       Retry if allowed
+                |             |
+                +------+------+
+                       |
+                       v
+                 Push Branch
+                       |
+                       v
+        Open Pull Request (success only)
+                       |
+                       v
+                 Final Report
+                       |
+                       v
+              Branch ready for review
 ```
 
 Each execution is associated with two identifiers:
@@ -222,11 +228,15 @@ AFK Agent will:
 6. Execute OpenCode.
 7. Run tests and retries.
 8. Commit any leftover changes.
-9. Push the branch and comment on the issue.
-10. Remove the worktree if the task failed, keeping the branch.
-11. Print the final execution report.
+9. Push the branch.
+10. Open a pull request into the default branch on success; reuse an existing open pull request on re-runs.
+11. Comment on the issue with the branch, pull request, commits, and test result.
+12. Remove the worktree if the task failed, keeping the branch.
+13. Print the final execution report.
 
-Pass `--no-push` to keep the branch local. The issue comment is still posted.
+Pass `--no-push` to keep the branch local; this also skips the pull request. Pass
+`--no-pr` to push the branch but skip the pull request. The issue comment is
+still posted.
 
 ---
 
@@ -265,6 +275,16 @@ when `origin` does not match the issue's repository, when the branch would
 need a force-push, or when a changed file looks like a secret (for example
 `.env`, `*.pem`, or `id_rsa`). A refused push does not block worktree cleanup.
 
+On a successful run whose branch was pushed, AFK Agent also opens a pull request
+from the task branch into the repository's default branch. The title is the
+issue title; the body links the issue, adds `Closes #N`, and summarizes the run
+(attempts, tests, changed files, and commits). Re-running an issue reuses the
+existing open pull request and adds a short run comment instead of opening a
+second one. Pull request creation is best effort: a failure is reported in the
+issue comment and the report, but it does not fail the run or block worktree
+cleanup. No pull request is opened when the run fails, when there are no
+commits, when push is disabled, or when `--no-pr` is passed.
+
 When the worktree is kept, you can inspect the changes with:
 
 ```bash
@@ -296,6 +316,7 @@ src/
 │   └── prompt.ts
 ├── github/
 │   ├── fetch_issues.ts
+│   ├── pull_request.ts
 │   ├── repo_validation.ts
 │   └── sync.ts
 ├── harness/
@@ -329,15 +350,13 @@ Currently, the focus is on:
 - Bounded process execution.
 - Test validation and retries.
 - Execution reporting.
+- GitHub pull request creation after successful validation.
 
 Future capabilities include:
 
 - Structured implementation summaries.
-- GitHub pull request creation after successful validation.
 - Better execution monitoring and recovery.
 - More granular sandbox permissions and network controls.
-
-PR creation is not part of the current workflow yet.
 
 ---
 

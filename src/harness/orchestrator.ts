@@ -15,6 +15,12 @@ import {
     type PushResult,
     type SyncRun,
 } from "../github/sync.js";
+import {
+    buildPullRequestBody,
+    openPullRequest,
+    resolveBaseBranch,
+    type PullRequestResult,
+} from "../github/pull_request.js";
 import type { GitHubIssue } from "../github/fetch_issues.js";
 import { getChangedFiles } from "./change.js";
 import type { HarnessReport } from "./report.js";
@@ -28,6 +34,7 @@ export type RunTaskInput = {
     prompt: string;
     issue?: GitHubIssue;
     push?: boolean;
+    pr?: boolean;
     model?: string;
     imageName?: string;
     timeout?: number;
@@ -43,6 +50,10 @@ export type SyncInfo = {
     pushError: string | null;
     commented: boolean;
     commentError: string | null;
+    prUrl: string | null;
+    prCreated: boolean;
+    prReused: boolean;
+    prError: string | null;
 };
 
 export type RunTaskResult = {
@@ -123,6 +134,7 @@ async function syncAfterRun(
         reports: HarnessReport[];
         error: string | null;
         pushEnabled: boolean;
+        prEnabled: boolean;
     },
     deps: RunTaskDependencies,
 ): Promise<SyncInfo> {
@@ -168,18 +180,73 @@ async function syncAfterRun(
         );
     }
 
+    const attempts = input.reports.length;
+    const testsPassed = lastReport?.testsPassed === true;
+    const changedFiles = lastReport?.changedFiles.length ?? 0;
+
+    let pr: PullRequestResult = {
+        created: false,
+        reused: false,
+        url: null,
+        error: null,
+    };
+
+    const shouldOpenPr =
+        success &&
+        commits.length > 0 &&
+        input.pushEnabled &&
+        push.pushed &&
+        input.prEnabled;
+
+    if (shouldOpenPr) {
+        try {
+            const baseBranch = await resolveBaseBranch(
+                input.worktreePath,
+                deps.run,
+            );
+
+            pr = await openPullRequest(
+                {
+                    worktreePath: input.worktreePath,
+                    branchName: input.branchName,
+                    issue: input.issue,
+                    baseBranch,
+                    title: input.issue.title,
+                    body: buildPullRequestBody({
+                        issue: input.issue,
+                        taskId: input.taskId,
+                        attempts,
+                        testsPassed,
+                        changedFiles,
+                        commits,
+                    }),
+                    rerunComment: `AFK re-run: attempt ${attempts}, tests ${testsPassed ? "passing" : "failing"}, ${changedFiles} files changed.`,
+                },
+                deps,
+            );
+        } catch (error) {
+            pr = {
+                created: false,
+                reused: false,
+                url: null,
+                error: getErrorMessage(error),
+            };
+        }
+    }
+
     const body = buildIssueComment({
         taskId: input.taskId,
         success,
-        attempts: input.reports.length,
+        attempts,
         branchName: input.branchName,
         issue: input.issue,
         push,
         commits,
-        testsPassed: lastReport?.testsPassed === true,
-        changedFiles: lastReport?.changedFiles.length ?? 0,
+        testsPassed,
+        changedFiles,
         reasons:
             lastReport?.reasons ?? (input.error === null ? [] : [input.error]),
+        pr: { url: pr.url, error: pr.error },
     });
 
     const comment = await postIssueComment({ issue: input.issue, body }, deps);
@@ -190,6 +257,10 @@ async function syncAfterRun(
         pushError: push.pushed ? null : push.reason,
         commented: comment.commented,
         commentError: comment.error,
+        prUrl: pr.url,
+        prCreated: pr.created,
+        prReused: pr.reused,
+        prError: pr.error,
     };
 }
 
@@ -206,6 +277,10 @@ async function safeSync(
             pushError: getErrorMessage(error),
             commented: false,
             commentError: null,
+            prUrl: null,
+            prCreated: false,
+            prReused: false,
+            prError: null,
         };
     }
 }
@@ -255,6 +330,7 @@ export async function runTask(
         branchName,
         taskId,
         pushEnabled: input.push !== false,
+        prEnabled: input.pr !== false,
     };
 
     let retryResult;

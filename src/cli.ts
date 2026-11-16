@@ -17,6 +17,7 @@ program
     .requiredOption("--repo <path>", "Repository path")
     .requiredOption("--issue <id>", "GitHub issue ID")
     .option("--no-push", "Skip pushing the branch to GitHub")
+    .option("--no-pr", "Skip opening a pull request")
     .action(async (options) => {
         try {
             const repoPath = await validateRepository(options.repo);
@@ -40,6 +41,7 @@ program
                 issue,
                 prompt,
                 push: options.push !== false,
+                pr: options.pr !== false,
             });
 
             // 4. Display report
@@ -70,6 +72,12 @@ program
                         "Issue comment failed:",
                         result.sync.commentError,
                     );
+                }
+                if (result.sync.prUrl) {
+                    console.log("Pull request:", result.sync.prUrl);
+                }
+                if (result.sync.prError) {
+                    console.warn("Pull request warning:", result.sync.prError);
                 }
             }
 

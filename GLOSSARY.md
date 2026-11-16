@@ -16,9 +16,17 @@ _Avoid_: run ID, session ID
 
 ### Execution environment
 
+**Task branch**:
+The `afk/<task-id>` branch that carries a task's work. The branch is the durable record; the Worktree is disposable.
+_Avoid_: feature branch, work branch
+
 **Worktree**:
-The per-task Git worktree under `.afk/worktrees/<task-id>/`, checked out on branch `afk/<task-id>`.
+The per-task Git worktree under `.afk/worktrees/<task-id>/`, checked out on its Task branch.
 _Avoid_: workspace, checkout
+
+**Base branch**:
+The repository's default branch (for example `main`), which a Pull request targets.
+_Avoid_: target branch, trunk
 
 **Sandbox**:
 The Docker container that runs the agent inside the worktree. A worktree alone is not a security boundary; the sandbox is.
@@ -37,3 +45,7 @@ _Avoid_: retry (use as the verb only)
 **Run report**:
 The final record of all attempts: what the agent did, test results, and remaining problems.
 _Avoid_: summary, log
+
+**Pull request**:
+The review artifact opened from a Task branch into the Base branch after a successful, pushed run.
+_Avoid_: PR, merge request

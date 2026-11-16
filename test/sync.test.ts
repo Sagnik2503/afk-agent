@@ -148,6 +148,47 @@ describe("buildIssueComment", () => {
         expect(body).toContain("tests failed");
     });
 
+    it("links the pull request when one was opened", () => {
+        const body = buildIssueComment({
+            ...base,
+            success: true,
+            attempts: 1,
+            push,
+            pr: {
+                url: "https://github.com/test-owner/test-repo/pull/7",
+                error: null,
+            },
+        });
+
+        expect(body).toContain(
+            "PR: https://github.com/test-owner/test-repo/pull/7",
+        );
+    });
+
+    it("explains why a pull request was not created", () => {
+        const body = buildIssueComment({
+            ...base,
+            success: true,
+            attempts: 1,
+            push,
+            pr: { url: null, error: "gh: not authenticated" },
+        });
+
+        expect(body).toContain("PR: not created (gh: not authenticated)");
+    });
+
+    it("omits the pull request line when it was skipped", () => {
+        const body = buildIssueComment({
+            ...base,
+            success: true,
+            attempts: 1,
+            push,
+            pr: { url: null, error: null },
+        });
+
+        expect(body).not.toContain("PR:");
+    });
+
     it("caps a long commit list", () => {
         const many = Array.from({ length: 60 }, (_, index) => ({
             sha: `sha${index}`,
