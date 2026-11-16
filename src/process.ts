@@ -14,6 +14,10 @@ export type ProcessOptions = {
     timeout?: number;
     maxOutput?: number;
     env?: NodeJS.ProcessEnv;
+    onOutput?: (
+        stream: "stdout" | "stderr",
+        chunk: string,
+    ) => void;
 };
 
 export function ChildProcess(
@@ -61,6 +65,7 @@ export function ChildProcess(
             : undefined;
 
         child.stdout?.on("data", (data: Buffer) => {
+            options.onOutput?.("stdout", data.toString());
             //data arrives as byte streams
             const remaining = maxOutput - capturedBytes;
             if (remaining <= 0) {
@@ -76,6 +81,7 @@ export function ChildProcess(
         });
 
         child.stderr?.on("data", (data: Buffer) => {
+            options.onOutput?.("stdout", data.toString());
             const remaining = maxOutput - capturedBytes;
             if (remaining <= 0) {
                 outputTruncated = true;
@@ -110,4 +116,22 @@ export function ChildProcess(
             });
         });
     });
+}
+
+export async function streamContainerLogs(
+    containerName: string,
+): Promise<void> {
+    await ChildProcess(
+        "docker",
+        ["logs", "--follow", containerName],
+        {
+            onOutput: (stream, chunk) => {
+                if (stream === "stdout") {
+                    process.stdout.write(chunk);
+                } else {
+                    process.stderr.write(chunk);
+                }
+            },
+        },
+    );
 }

@@ -3,6 +3,7 @@ import { runTask } from "./harness/orchestrator.js";
 import { deriveTaskId, fetchGitHubIssue } from "./github/fetch_issues.js";
 import { validateRepository } from "./github/repo_validation.js";
 import { buildIssuePrompt } from "./agent/prompt.js";
+import { streamContainerLogs } from "./process.js";
 
 const program = new Command();
 
@@ -108,6 +109,33 @@ program
         } catch (error) {
             console.error(
                 "AFK Agent failed:",
+                error instanceof Error ? error.message : error,
+            );
+            process.exitCode = 1;
+        }
+    });
+
+program
+    .command("logs")
+    .description("Monitor a running AFK agent")
+    .requiredOption("--repo <path>", "Repository path")
+    .requiredOption("--issue <id>", "GitHub issue ID")
+    .action(async (options) => {
+        try {
+            const repoPath = await validateRepository(options.repo);
+
+            const issue = await fetchGitHubIssue(
+                repoPath,
+                options.issue,
+            );
+
+            const taskId = deriveTaskId(issue);
+            const containerName = `afk-${taskId}`;
+
+            await streamContainerLogs(containerName);
+        } catch (error) {
+            console.error(
+                "Unable to monitor agent:",
                 error instanceof Error ? error.message : error,
             );
             process.exitCode = 1;

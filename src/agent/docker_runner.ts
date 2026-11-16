@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ChildProcess, type ProcessResult } from "../process.js";
+import { streamContainerLogs } from "../process.js";
 
 export const DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free";
 export const DEFAULT_IMAGE = "afk-agent:latest";
@@ -29,6 +30,7 @@ export type DockerAgentOptions = {
 export type DockerAgent = {
     prepareImage: () => Promise<void>;
     run: (prompt: string) => Promise<ProcessResult>;
+    streamLogs: () => Promise<void>;
 };
 
 export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
@@ -169,5 +171,5 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
         return result!;
     }
 
-    return { prepareImage, run };
+    return { prepareImage, run, streamLogs: () => streamContainerLogs(containerName), };
 }
