@@ -14,10 +14,7 @@ export type ProcessOptions = {
     timeout?: number;
     maxOutput?: number;
     env?: NodeJS.ProcessEnv;
-    onOutput?: (
-        stream: "stdout" | "stderr",
-        chunk: string,
-    ) => void;
+    onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 };
 
 export function ChildProcess(
@@ -116,22 +113,4 @@ export function ChildProcess(
             });
         });
     });
-}
-
-export async function streamContainerLogs(
-    containerName: string,
-): Promise<void> {
-    await ChildProcess(
-        "docker",
-        ["logs", "--follow", containerName],
-        {
-            onOutput: (stream, chunk) => {
-                if (stream === "stdout") {
-                    process.stdout.write(chunk);
-                } else {
-                    process.stderr.write(chunk);
-                }
-            },
-        },
-    );
 }

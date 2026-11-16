@@ -1,6 +1,5 @@
 import path from "node:path";
 import { ChildProcess, type ProcessResult } from "../process.js";
-import { streamContainerLogs } from "../process.js";
 
 export const DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free";
 export const DEFAULT_IMAGE = "afk-agent:latest";
@@ -32,6 +31,49 @@ export type DockerAgent = {
     run: (prompt: string) => Promise<ProcessResult>;
     streamLogs: () => Promise<void>;
 };
+
+export async function streamContainerLogs(
+    containerName: string,
+): Promise<void> {
+    const inspect = await ChildProcess("docker", [
+        "inspect",
+        "-f",
+        "{{.State.Running}}",
+        containerName,
+    ]);
+
+    if (inspect.exitCode !== 0) {
+        if (inspect.stderr.includes("No such object")) {
+            throw new Error("No running agent found for this issue.");
+        }
+
+        throw new Error(
+            `Unable to inspect Docker container: ${inspect.stderr}`,
+        );
+    }
+
+    if (inspect.stdout.trim() !== "true") {
+        throw new Error("Agent is not running.");
+    }
+
+    const result = await ChildProcess(
+        "docker",
+        ["logs", "--follow", containerName],
+        {
+            onOutput: (stream, chunk) => {
+                if (stream === "stdout") {
+                    process.stdout.write(chunk);
+                } else {
+                    process.stderr.write(chunk);
+                }
+            },
+        },
+    );
+
+    if (result.exitCode !== 0) {
+        throw new Error(`Unable to stream container logs: ${result.stderr}`);
+    }
+}
 
 export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     if (!/^[a-zA-Z0-9_-]+$/.test(options.taskId)) {
@@ -171,5 +213,9 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
         return result!;
     }
 
-    return { prepareImage, run, streamLogs: () => streamContainerLogs(containerName), };
+    return {
+        prepareImage,
+        run,
+        streamLogs: () => streamContainerLogs(containerName),
+    };
 }

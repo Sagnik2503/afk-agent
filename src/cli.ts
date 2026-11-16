@@ -3,7 +3,7 @@ import { runTask } from "./harness/orchestrator.js";
 import { deriveTaskId, fetchGitHubIssue } from "./github/fetch_issues.js";
 import { validateRepository } from "./github/repo_validation.js";
 import { buildIssuePrompt } from "./agent/prompt.js";
-import { streamContainerLogs } from "./process.js";
+import { streamContainerLogs } from "./agent/docker_runner.js";
 
 const program = new Command();
 
@@ -124,10 +124,7 @@ program
         try {
             const repoPath = await validateRepository(options.repo);
 
-            const issue = await fetchGitHubIssue(
-                repoPath,
-                options.issue,
-            );
+            const issue = await fetchGitHubIssue(repoPath, options.issue);
 
             const taskId = deriveTaskId(issue);
             const containerName = `afk-${taskId}`;
