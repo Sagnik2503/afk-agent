@@ -152,4 +152,37 @@ describe("ChildProcess", () => {
 
         expect(result.outputTruncated).toBe(true);
     });
+
+    it("reports stderr chunks as stderr", async () => {
+        const chunks: Array<[string, string]> = [];
+
+        await ChildProcess(
+            execPath,
+            ["-e", "process.stdout.write('out'); process.stderr.write('err')"],
+            {
+                onOutput: (stream, chunk) => {
+                    chunks.push([stream, chunk]);
+                },
+            },
+        );
+
+        expect(chunks).toContainEqual(["stdout", "out"]);
+        expect(chunks).toContainEqual(["stderr", "err"]);
+    });
+
+    it("terminates a running process when the signal is aborted", async () => {
+        const controller = new AbortController();
+        const running = ChildProcess(
+            execPath,
+            ["-e", "setInterval(() => {}, 1000)"],
+            { signal: controller.signal },
+        );
+
+        setTimeout(() => controller.abort(), 100);
+
+        const result = await running;
+
+        expect(result.signal).toBe("SIGTERM");
+        expect(result.timedOut).toBe(false);
+    });
 });
