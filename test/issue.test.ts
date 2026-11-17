@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
     deriveTaskId,
+    parseIssueNumber,
     parseIssueUrl,
     slugify,
 } from "../src/github/fetch_issues.js";
@@ -64,5 +65,23 @@ describe("deriveTaskId", () => {
 
     it("falls back to the issue number when the title is empty", () => {
         expect(deriveTaskId(issue({ title: "🎉" }))).toBe("issue-102");
+    });
+});
+
+describe("parseIssueNumber", () => {
+    it("accepts a bare issue number", () => {
+        expect(parseIssueNumber("142")).toBe(142);
+    });
+
+    it("accepts a GitHub issue URL", () => {
+        expect(
+            parseIssueNumber("https://github.com/owner/repo/issues/142"),
+        ).toBe(142);
+    });
+
+    it("rejects invalid issue input", () => {
+        expect(() => parseIssueNumber("not an issue")).toThrow("Invalid issue");
+        expect(() => parseIssueNumber("0")).toThrow("Invalid issue");
+        expect(() => parseIssueNumber("142abc")).toThrow("Invalid issue");
     });
 });

@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ProcessResult } from "../src/process.js";
 import { ChildProcess } from "../src/process.js";
-import { createDockerAgent } from "../src/agent/docker_runner.js";
+import {
+    createDockerAgent,
+    watchSandboxLogs,
+} from "../src/agent/docker_runner.js";
 
 vi.mock("../src/process.js", () => ({
     ChildProcess: vi.fn(),
@@ -323,5 +326,204 @@ describe("createDockerAgent", () => {
             ["rm", "-f", "afk-task-1"],
             { timeout: 10_000 },
         );
+    });
+});
+
+function inspection(
+    options: {
+        running?: boolean;
+        mounts?: string[];
+    } = {},
+): ProcessResult {
+    return result({
+        stdout: JSON.stringify([
+            {
+                State: { Running: options.running ?? true },
+                Mounts: (
+                    options.mounts ?? ["/repo/.afk/worktrees/issue-14-add-slug"]
+                ).map((Source) => ({ Source })),
+            },
+        ]),
+    });
+}
+
+describe("watchSandboxLogs", () => {
+    it("follows the logs of the running Sandbox for the issue", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({ stdout: "afk-issue-14-add-slug\n" }),
+            )
+            .mockResolvedValueOnce(inspection())
+            .mockResolvedValueOnce(result());
+
+        await watchSandboxLogs("/repo", 14);
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(1, "docker", [
+            "ps",
+            "--filter",
+            "name=afk-issue-14-",
+            "--format",
+            "{{.Names}}",
+        ]);
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(2, "docker", [
+            "inspect",
+            "afk-issue-14-add-slug",
+        ]);
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            3,
+            "docker",
+            ["logs", "--follow", "afk-issue-14-add-slug"],
+            expect.objectContaining({ onOutput: expect.any(Function) }),
+        );
+    });
+
+    it("does not match a Sandbox for a longer issue number", async () => {
+        mockedChildProcess.mockResolvedValueOnce(
+            result({ stdout: "afk-issue-142-other\n" }),
+        );
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 14 }),
+        ).rejects.toThrow("No running agent for issue 14 in /repo");
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a Sandbox mounted from another repository", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({ stdout: "afk-issue-14-add-slug\n" }),
+            )
+            .mockResolvedValueOnce(
+                inspection({
+                    mounts: ["/other/.afk/worktrees/issue-14-add-slug"],
+                }),
+            );
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 14 }),
+        ).rejects.toThrow("No running agent for issue 14 in /repo");
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails when no Sandbox is running for the issue", async () => {
+        mockedChildProcess.mockResolvedValueOnce(result());
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 14 }),
+        ).rejects.toThrow("No running agent for issue 14 in /repo");
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("routes container stdout and stderr to the matching process streams", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({ stdout: "afk-issue-14-add-slug\n" }),
+            )
+            .mockResolvedValueOnce(inspection())
+            .mockImplementationOnce(async (_command, _args, options) => {
+                options?.onOutput?.("stdout", "container-out");
+                options?.onOutput?.("stderr", "container-err");
+                return result();
+            });
+
+        const stdout = vi.spyOn(process.stdout, "write");
+        const stderr = vi.spyOn(process.stderr, "write");
+
+        try {
+            await watchSandboxLogs({ repoPath: "/repo", issueNumber: 14 });
+
+            expect(stdout).toHaveBeenCalledWith("container-out");
+            expect(stderr).toHaveBeenCalledWith("container-err");
+        } finally {
+            stdout.mockRestore();
+            stderr.mockRestore();
+        }
+    });
+
+    it("rejects an invalid issue number before calling Docker", async () => {
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 0 }),
+        ).rejects.toThrow("Invalid issue number");
+
+        expect(mockedChildProcess).not.toHaveBeenCalled();
+    });
+
+    it("ends normally when following fails because the container is gone", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({ stdout: "afk-issue-14-add-slug\n" }),
+            )
+            .mockResolvedValueOnce(inspection())
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "stream closed" }),
+            )
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "No such object" }),
+            );
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 14 }),
+        ).resolves.toBeUndefined();
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(4);
+    });
+
+    it("throws when following fails but the container is still running", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({ stdout: "afk-issue-14-add-slug\n" }),
+            )
+            .mockResolvedValueOnce(inspection())
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "permission denied" }),
+            )
+            .mockResolvedValueOnce(inspection());
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 14 }),
+        ).rejects.toThrow("Unable to stream container logs: permission denied");
+    });
+
+    it("stops following when the signal is aborted", async () => {
+        const controller = new AbortController();
+        let followStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+            followStarted = resolve;
+        });
+
+        mockedChildProcess.mockImplementation(
+            async (_command, args, options) => {
+                if (args[0] === "ps") {
+                    return result({ stdout: "afk-issue-14-add-slug\n" });
+                }
+
+                if (args[0] === "inspect") {
+                    return inspection();
+                }
+
+                followStarted();
+
+                return new Promise<ProcessResult>((resolve) => {
+                    options?.signal?.addEventListener("abort", () => {
+                        resolve(result({ exitCode: null, signal: "SIGTERM" }));
+                    });
+                });
+            },
+        );
+
+        const watching = watchSandboxLogs({
+            repoPath: "/repo",
+            issueNumber: 14,
+            signal: controller.signal,
+        });
+
+        await started;
+        controller.abort();
+
+        await expect(watching).resolves.toBeUndefined();
+        expect(mockedChildProcess).toHaveBeenCalledTimes(3);
     });
 });
