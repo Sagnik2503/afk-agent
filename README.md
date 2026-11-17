@@ -238,6 +238,27 @@ Pass `--no-push` to keep the branch local; this also skips the pull request. Pas
 `--no-pr` to push the branch but skip the pull request. The issue comment is
 still posted.
 
+### Watch Sandbox logs
+
+Stream the live Sandbox output of a running agent in a second terminal:
+
+```bash
+npm run dev -- logs --repo . --issue 142
+```
+
+`--issue` accepts a bare issue number or a GitHub issue URL. The command
+discovers the running Sandbox for that issue, verifies it belongs to the given
+repository, and follows its Docker logs. It does not call GitHub, so it works
+offline and without `gh` authentication.
+
+The stream ends when the current Attempt finishes, and you can re-run the command
+to watch the next Attempt. Press Ctrl-C (or send SIGTERM) to stop watching; this
+also stops the underlying `docker logs` process.
+
+Sandbox logs are ephemeral. The Sandbox is disposable and is removed at the end
+of an agent run, so there is no post-mortem log file to inspect afterwards. Run
+the `logs` command while the agent is still running.
+
 ---
 
 ## What happens after execution?
@@ -329,8 +350,7 @@ src/
 ├── worktree/
 │   └── manager.ts
 ├── process.ts
-├── cli.ts
-└── index.ts
+└── cli.ts
 
 test/
 ```

@@ -1,9 +1,13 @@
 import { Command } from "commander";
 import { runTask } from "./harness/orchestrator.js";
-import { deriveTaskId, fetchGitHubIssue } from "./github/fetch_issues.js";
+import {
+    deriveTaskId,
+    fetchGitHubIssue,
+    parseIssueNumber,
+} from "./github/fetch_issues.js";
 import { validateRepository } from "./github/repo_validation.js";
 import { buildIssuePrompt } from "./agent/prompt.js";
-import { streamContainerLogs } from "./agent/docker_runner.js";
+import { watchSandboxLogs } from "./agent/docker_runner.js";
 
 const program = new Command();
 
@@ -117,25 +121,36 @@ program
 
 program
     .command("logs")
-    .description("Monitor a running AFK agent")
+    .description("Stream the Sandbox logs of a running AFK agent")
     .requiredOption("--repo <path>", "Repository path")
-    .requiredOption("--issue <id>", "GitHub issue ID")
+    .requiredOption("--issue <number-or-url>", "GitHub issue number or URL")
     .action(async (options) => {
+        const controller = new AbortController();
+        const onSignal = (): void => controller.abort();
+
+        process.on("SIGINT", onSignal);
+        process.on("SIGTERM", onSignal);
+
         try {
+            const issueNumber = parseIssueNumber(options.issue);
             const repoPath = await validateRepository(options.repo);
 
-            const issue = await fetchGitHubIssue(repoPath, options.issue);
-
-            const taskId = deriveTaskId(issue);
-            const containerName = `afk-${taskId}`;
-
-            await streamContainerLogs(containerName);
+            await watchSandboxLogs({
+                repoPath,
+                issueNumber,
+                signal: controller.signal,
+            });
         } catch (error) {
-            console.error(
-                "Unable to monitor agent:",
-                error instanceof Error ? error.message : error,
-            );
-            process.exitCode = 1;
+            if (!controller.signal.aborted) {
+                console.error(
+                    "Unable to monitor agent:",
+                    error instanceof Error ? error.message : error,
+                );
+                process.exitCode = 1;
+            }
+        } finally {
+            process.off("SIGINT", onSignal);
+            process.off("SIGTERM", onSignal);
         }
     });
 

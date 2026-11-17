@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, rm, copyFile, realpath } from "node:fs/promises";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { mkdtemp, rm, copyFile, realpath, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { ChildProcess } from "../src/process.js";
 import {
     createDockerAgent,
     DEFAULT_MODEL,
+    watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
 import { setupWorktree } from "../src/worktree/manager.js";
 
@@ -138,4 +139,129 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
         },
         15 * 60 * 1000,
     );
+
+    describe("sandbox logs", () => {
+        beforeAll(async () => {
+            const agent = createDockerAgent({
+                repoPath: repo,
+                taskId,
+                issueId: "issue-1",
+                imageName,
+            });
+
+            await agent.prepareImage();
+        }, 120_000);
+
+        function capture(stream: NodeJS.WriteStream): {
+            text: () => string;
+            restore: () => void;
+        } {
+            const spy = vi.spyOn(stream, "write");
+
+            return {
+                text: () =>
+                    spy.mock.calls.map((call) => String(call[0])).join(""),
+                restore: () => spy.mockRestore(),
+            };
+        }
+
+        it("streams Sandbox logs and ends when the container disappears", async () => {
+            const issueNumber = 900_000 + (process.pid % 100_000);
+            const containerName = `afk-issue-${issueNumber}-${Date.now()}`;
+            const worktreePath = join(repo, ".afk", "worktrees", taskId);
+            const stdout = capture(process.stdout);
+            const stderr = capture(process.stderr);
+            let watching: Promise<void> | undefined;
+
+            try {
+                const started = await ChildProcess("docker", [
+                    "run",
+                    "-d",
+                    "--name",
+                    containerName,
+                    "-v",
+                    `${worktreePath}:${worktreePath}`,
+                    imageName,
+                    "node",
+                    "-e",
+                    [
+                        "setInterval(() => {",
+                        "console.log('sandbox-stdout-marker');",
+                        "console.error('sandbox-stderr-marker');",
+                        "}, 200);",
+                    ].join(" "),
+                ]);
+
+                expect(started.exitCode, started.stderr).toBe(0);
+
+                watching = watchSandboxLogs({
+                    repoPath: repo,
+                    issueNumber,
+                });
+
+                await vi.waitFor(
+                    () => {
+                        expect(stdout.text()).toContain(
+                            "sandbox-stdout-marker",
+                        );
+                        expect(stderr.text()).toContain(
+                            "sandbox-stderr-marker",
+                        );
+                    },
+                    { timeout: 15_000, interval: 100 },
+                );
+
+                await ChildProcess("docker", ["rm", "-f", containerName]);
+
+                await expect(watching).resolves.toBeUndefined();
+            } finally {
+                await ChildProcess("docker", ["rm", "-f", containerName]);
+                stdout.restore();
+                stderr.restore();
+            }
+        }, 60_000);
+
+        it("refuses a Sandbox mounted from a different repository", async () => {
+            const issueNumber = 900_001 + (process.pid % 100_000);
+            const containerName = `afk-issue-${issueNumber}-${Date.now()}`;
+            const otherRepo = await mkdtemp(join(tmpdir(), "afk-agent-other-"));
+            const otherWorktree = join(
+                otherRepo,
+                ".afk",
+                "worktrees",
+                "issue-other",
+            );
+
+            await mkdir(otherWorktree, { recursive: true });
+
+            try {
+                const started = await ChildProcess("docker", [
+                    "run",
+                    "-d",
+                    "--name",
+                    containerName,
+                    "-v",
+                    `${otherWorktree}:${otherWorktree}`,
+                    imageName,
+                    "node",
+                    "-e",
+                    "setInterval(() => {}, 1000)",
+                ]);
+
+                expect(started.exitCode, started.stderr).toBe(0);
+
+                await expect(
+                    watchSandboxLogs({
+                        repoPath: repo,
+                        issueNumber,
+                    }),
+                ).rejects.toThrow(
+                    `No running agent for issue ${issueNumber} in ${repo}`,
+                );
+            } finally {
+                await ChildProcess("docker", ["rm", "-f", containerName]);
+                await rm(otherRepo, { recursive: true, force: true });
+            }
+        }, 60_000);
+    });
 });

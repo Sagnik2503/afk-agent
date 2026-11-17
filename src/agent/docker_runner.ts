@@ -29,50 +29,186 @@ export type DockerAgentOptions = {
 export type DockerAgent = {
     prepareImage: () => Promise<void>;
     run: (prompt: string) => Promise<ProcessResult>;
-    streamLogs: () => Promise<void>;
 };
 
-export async function streamContainerLogs(
-    containerName: string,
-): Promise<void> {
-    const inspect = await ChildProcess("docker", [
-        "inspect",
-        "-f",
-        "{{.State.Running}}",
-        containerName,
-    ]);
+export type WatchSandboxLogsOptions = {
+    repoPath: string;
+    issueNumber: number;
+    signal?: AbortSignal;
+};
 
-    if (inspect.exitCode !== 0) {
-        if (inspect.stderr.includes("No such object")) {
-            throw new Error("No running agent found for this issue.");
+type ContainerInspection = {
+    running: boolean;
+    mounts: string[];
+};
+
+function noRunningAgentMessage(repoPath: string, issueNumber: number): string {
+    return `No running agent for issue ${issueNumber} in ${repoPath}.`;
+}
+
+function finishedMessage(repoPath: string, issueNumber: number): string {
+    return `Agent for issue ${issueNumber} in ${repoPath} has finished.`;
+}
+
+async function inspectContainer(
+    containerName: string,
+): Promise<ContainerInspection | null> {
+    const result = await ChildProcess("docker", ["inspect", containerName]);
+
+    if (result.exitCode !== 0) {
+        if (
+            result.stderr.includes("No such object") ||
+            result.stderr.includes("No such container")
+        ) {
+            return null;
         }
 
         throw new Error(
-            `Unable to inspect Docker container: ${inspect.stderr}`,
+            `Unable to inspect Docker container: ${result.stderr.trim()}`,
         );
     }
 
-    if (inspect.stdout.trim() !== "true") {
-        throw new Error("Agent is not running.");
+    let parsed: unknown;
+
+    try {
+        parsed = JSON.parse(result.stdout);
+    } catch {
+        throw new Error(
+            "Unable to inspect Docker container: invalid inspect output",
+        );
     }
 
-    const result = await ChildProcess(
-        "docker",
-        ["logs", "--follow", containerName],
-        {
-            onOutput: (stream, chunk) => {
-                if (stream === "stdout") {
-                    process.stdout.write(chunk);
-                } else {
-                    process.stderr.write(chunk);
-                }
-            },
-        },
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+        return null;
+    }
+
+    const details = parsed[0] as {
+        State?: { Running?: boolean };
+        Mounts?: Array<{ Source?: string }>;
+    };
+
+    const mounts = (details.Mounts ?? []).flatMap((mount) =>
+        typeof mount.Source === "string" ? [mount.Source] : [],
     );
 
-    if (result.exitCode !== 0) {
-        throw new Error(`Unable to stream container logs: ${result.stderr}`);
+    return {
+        running: details.State?.Running === true,
+        mounts,
+    };
+}
+
+async function followContainerLogs(
+    containerName: string,
+    signal?: AbortSignal,
+): Promise<ProcessResult> {
+    return ChildProcess("docker", ["logs", "--follow", containerName], {
+        onOutput: (stream, chunk) => {
+            if (stream === "stdout") {
+                process.stdout.write(chunk);
+            } else {
+                process.stderr.write(chunk);
+            }
+        },
+        ...(signal ? { signal } : {}),
+    });
+}
+
+export function watchSandboxLogs(
+    options: WatchSandboxLogsOptions,
+): Promise<void>;
+export function watchSandboxLogs(
+    repoPath: string,
+    issueNumber: number,
+    signal?: AbortSignal,
+): Promise<void>;
+export async function watchSandboxLogs(
+    optionsOrRepoPath: WatchSandboxLogsOptions | string,
+    issueNumberArg?: number,
+    signalArg?: AbortSignal,
+): Promise<void> {
+    const resolved =
+        typeof optionsOrRepoPath === "string"
+            ? {
+                  repoPath: optionsOrRepoPath,
+                  issueNumber: issueNumberArg,
+                  signal: signalArg,
+              }
+            : optionsOrRepoPath;
+    const { repoPath, issueNumber, signal } = resolved;
+
+    if (
+        issueNumber === undefined ||
+        !Number.isSafeInteger(issueNumber) ||
+        issueNumber <= 0
+    ) {
+        throw new Error(`Invalid issue number: ${issueNumber}`);
     }
+
+    const prefix = `afk-issue-${issueNumber}-`;
+    const listed = await ChildProcess("docker", [
+        "ps",
+        "--filter",
+        `name=${prefix}`,
+        "--format",
+        "{{.Names}}",
+    ]);
+
+    if (listed.exitCode !== 0) {
+        throw new Error(
+            `Unable to list Docker containers: ${listed.stderr.trim()}`,
+        );
+    }
+
+    const candidates = listed.stdout
+        .split(/\r?\n/)
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0 && name.startsWith(prefix));
+
+    if (candidates.length === 0) {
+        throw new Error(noRunningAgentMessage(repoPath, issueNumber));
+    }
+
+    if (candidates.length > 1) {
+        throw new Error(
+            `Multiple running agents found for issue ${issueNumber} in ${repoPath}.`,
+        );
+    }
+
+    const containerName = candidates[0]!;
+    const inspection = await inspectContainer(containerName);
+
+    if (!inspection || !inspection.running) {
+        throw new Error(noRunningAgentMessage(repoPath, issueNumber));
+    }
+
+    const worktreesRoot = path.resolve(repoPath, ".afk", "worktrees");
+    const ownsWorktree = inspection.mounts.some((source) =>
+        path.resolve(source).startsWith(`${worktreesRoot}${path.sep}`),
+    );
+
+    if (!ownsWorktree) {
+        throw new Error(noRunningAgentMessage(repoPath, issueNumber));
+    }
+
+    const result = await followContainerLogs(containerName, signal);
+
+    if (signal?.aborted) {
+        return;
+    }
+
+    if (result.exitCode === 0) {
+        console.log(finishedMessage(repoPath, issueNumber));
+        return;
+    }
+
+    const after = await inspectContainer(containerName);
+
+    if (!after || !after.running) {
+        console.log(finishedMessage(repoPath, issueNumber));
+        return;
+    }
+
+    throw new Error(`Unable to stream container logs: ${result.stderr.trim()}`);
 }
 
 export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
@@ -216,6 +352,5 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     return {
         prepareImage,
         run,
-        streamLogs: () => streamContainerLogs(containerName),
     };
 }

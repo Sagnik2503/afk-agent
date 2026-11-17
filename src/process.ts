@@ -14,6 +14,7 @@ export type ProcessOptions = {
     timeout?: number;
     maxOutput?: number;
     env?: NodeJS.ProcessEnv;
+    signal?: AbortSignal;
     onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 };
 
@@ -35,31 +36,53 @@ export function ChildProcess(
         let stdout = "";
         let stderr = "";
         let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+        let terminating = false;
         let capturedBytes = 0;
         const maxOutput = options.maxOutput ?? 1024 * 1024; //1MB (default) of shared output storage (stdout + stderr)
+
+        function terminate(): void {
+            if (terminating) return;
+            terminating = true;
+
+            if (child.pid !== undefined) {
+                try {
+                    process.kill(-child.pid, "SIGTERM"); //process. targets the process grp whereas child. targets the child only
+                } catch {
+                    child.kill("SIGTERM");
+                }
+            }
+
+            //give 5 seconds and kill the process instead of graceful shutdown
+            forceKillTimer = setTimeout(() => {
+                if (child.pid === undefined) return;
+                try {
+                    process.kill(-child.pid, "SIGKILL");
+                } catch {
+                    child.kill("SIGKILL");
+                }
+            }, 5000);
+        }
 
         const timer = options.timeout
             ? setTimeout(() => {
                   timedOut_flag = true;
-                  if (child.pid !== undefined) {
-                      try {
-                          process.kill(-child.pid, "SIGTERM"); //process. targets the process grp whereas child. targets the child only
-                      } catch {
-                          child.kill("SIGTERM");
-                      }
-                  }
-
-                  //give 5 seconds and kill the process instead of graceful shutdown
-                  forceKillTimer = setTimeout(() => {
-                      if (child.pid === undefined) return;
-                      try {
-                          process.kill(-child.pid, "SIGKILL");
-                      } catch {
-                          child.kill("SIGKILL");
-                      }
-                  }, 5000);
+                  terminate();
               }, options.timeout)
             : undefined;
+
+        const onAbort = (): void => {
+            terminate();
+        };
+
+        if (options.signal) {
+            if (options.signal.aborted) {
+                onAbort();
+            } else {
+                options.signal.addEventListener("abort", onAbort, {
+                    once: true,
+                });
+            }
+        }
 
         child.stdout?.on("data", (data: Buffer) => {
             options.onOutput?.("stdout", data.toString());
@@ -78,7 +101,7 @@ export function ChildProcess(
         });
 
         child.stderr?.on("data", (data: Buffer) => {
-            options.onOutput?.("stdout", data.toString());
+            options.onOutput?.("stderr", data.toString());
             const remaining = maxOutput - capturedBytes;
             if (remaining <= 0) {
                 outputTruncated = true;
@@ -93,15 +116,19 @@ export function ChildProcess(
             capturedBytes += chunk.length;
         });
 
-        child.on("error", (error) => {
+        function cleanup(): void {
             if (timer) clearTimeout(timer);
             if (forceKillTimer) clearTimeout(forceKillTimer);
+            options.signal?.removeEventListener("abort", onAbort);
+        }
+
+        child.on("error", (error) => {
+            cleanup();
             reject(error);
         });
 
         child.on("close", (exitCode, signal) => {
-            if (timer) clearTimeout(timer);
-            if (forceKillTimer) clearTimeout(forceKillTimer);
+            cleanup();
 
             resolve({
                 stdout,

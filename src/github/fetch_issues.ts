@@ -32,6 +32,22 @@ export function parseIssueUrl(url: string): IssueLocation | null {
     return { owner, repo, number: Number(number) };
 }
 
+export function parseIssueNumber(value: string): number {
+    const trimmed = value.trim();
+    const location = parseIssueUrl(trimmed);
+    const number =
+        location?.number ??
+        (/^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN);
+
+    if (!Number.isSafeInteger(number) || number <= 0) {
+        throw new Error(
+            `Invalid issue: ${value}. Pass an issue number or GitHub issue URL.`,
+        );
+    }
+
+    return number;
+}
+
 export function slugify(title: string): string {
     return title
         .toLowerCase()
