@@ -172,7 +172,7 @@ All attempts are reported, and changes accumulate in the same worktree.
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js >=22.12.0
 - Git
 - Docker
 - GitHub CLI (`gh`)

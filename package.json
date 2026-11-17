@@ -1,18 +1,32 @@
 {
     "$schema": "https://json.schemastore.org/package",
     "name": "afk-agent",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "description": "afk-agent",
     "license": "ISC",
     "author": "",
     "type": "module",
-    "main": "index.js",
+    "main": "dist/cli.js",
+    "bin": {
+        "afk": "dist/cli.js"
+    },
+    "files": [
+        "dist",
+        "Dockerfile",
+        "README.md",
+        "LICENSE"
+    ],
+    "engines": {
+        "node": ">=22.12.0"
+    },
     "overrides": {
         "minimatch": "^11.0.8"
     },
     "scripts": {
         "test": "vitest run",
         "typecheck": "tsc --noEmit",
+        "build": "tsc -p tsconfig.build.json",
+        "prepack": "npm run build",
         "dev": "tsx src/cli.ts",
         "test:watch": "vitest",
         "check": "npm run typecheck && npm run lint && npm run format:check && npm test",

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Command } from "commander";
 import { runTask } from "./harness/orchestrator.js";
 import {
@@ -8,13 +9,14 @@ import {
 import { validateRepository } from "./github/repo_validation.js";
 import { buildIssuePrompt } from "./agent/prompt.js";
 import { watchSandboxLogs } from "./agent/docker_runner.js";
+import { packageVersion } from "./package_info.js";
 
 const program = new Command();
 
 program
     .name("afk-agent")
     .description("A safe, bounded AFK coding agent")
-    .version("1.0.0");
+    .version(packageVersion());
 
 program
     .command("run")

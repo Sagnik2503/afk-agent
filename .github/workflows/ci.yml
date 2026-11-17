@@ -35,3 +35,8 @@ jobs:
 
             - name: Run quality checks
               run: npm run check
+
+            - name: Verify built CLI version
+              run: |
+                  npm run build
+                  node dist/cli.js --version | grep -qx "$(node -p 'require("./package.json").version')"
