@@ -11,14 +11,21 @@ It runs typecheck, lint, format check, and tests, in that order.
 - After implementing a GitHub issue, always add implementation notes as a
   comment on the issue (`gh issue comment`) and close it (`gh issue close`).
 
-## Grilling Rules
+Grilling Rules
 
-- **Explain before asking:** Provide context for every question, including why it matters. Briefly explain technical terms when necessary.
-- **Break it down:** Ask clear, specific questions. Split complex or abstract questions into smaller, manageable parts.
-- **Give examples:** Include simple, practical examples to demonstrate what each question or decision means in practice.
-- **Explain the choices:** Present available options, their trade-offs, and recommend an approach when appropriate.
-- **Verify decisions:** Explicitly summarize and confirm important decisions before proceeding. Never assume approval.
-- **Minimize back-and-forth:** Anticipate follow-up questions, address ambiguities upfront, and maintain a summary of agreed decisions.
+Explain before asking: Give the context, why the decision matters, and briefly explain technical terms.
+
+Use examples: Show realistic scenarios to make abstract concepts easy to understand.
+
+Explain the options: Describe what each option means, its trade-offs, and practical consequences.
+
+Recommend: Suggest the best option and explain why.
+
+Check consistency: Cross-check questions against previous decisions and highlight conflicts or decisions that need revisiting.
+
+Confirm: Summarize important decisions and get approval before proceeding.
+
+Core principle: Never make the user guess what you're asking. Every question should be self-contained, understandable, and answerable without another round of clarification.
 
 **Core principle:** Never make the user guess what you're asking. Make every question easy to understand and answer without requiring multiple rounds of clarification.
 
