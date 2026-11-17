@@ -91,6 +91,54 @@ describe("getChangedFiles", () => {
         }
     });
 
+    it("returns committed files even when the worktree is clean", async () => {
+        const repo = await makeRepo();
+        const origin = await mkdtemp(
+            join(tmpdir(), "afk-agent-changes-origin-"),
+        );
+
+        try {
+            await ChildProcess("git", ["init", "-q", "--bare"], {
+                cwd: origin,
+            });
+            await ChildProcess("git", ["remote", "add", "origin", origin], {
+                cwd: repo,
+            });
+            await ChildProcess(
+                "git",
+                ["push", "-q", "origin", "HEAD:refs/heads/main"],
+                { cwd: repo },
+            );
+            await ChildProcess("git", ["fetch", "-q", "origin"], {
+                cwd: repo,
+            });
+
+            await writeFile(join(repo, "committed.txt"), "content");
+            await ChildProcess("git", ["add", "committed.txt"], { cwd: repo });
+            await ChildProcess(
+                "git",
+                [
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "user.name=Test",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "add committed",
+                ],
+                { cwd: repo },
+            );
+
+            const files = await getChangedFiles(repo);
+
+            expect(files).toEqual(["committed.txt"]);
+        } finally {
+            await rm(repo, { recursive: true, force: true });
+            await rm(origin, { recursive: true, force: true });
+        }
+    });
+
     it("throws when the path is not a git repository", async () => {
         const directory = await mkdtemp(
             join(tmpdir(), "afk-agent-changes-not-repo-"),
