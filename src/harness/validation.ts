@@ -7,8 +7,11 @@ export type TestResult = {
     timedOut: boolean;
 };
 
-export async function runTests(worktreePath: string): Promise<TestResult> {
-    const result = await ChildProcess("npm", ["test"], {
+export async function runTests(
+    worktreePath: string,
+    command = "npm test",
+): Promise<TestResult> {
+    const result = await ChildProcess("sh", ["-c", command], {
         cwd: worktreePath,
         timeout: 120_000,
     });

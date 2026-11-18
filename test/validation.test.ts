@@ -44,4 +44,35 @@ describe("runTests", () => {
             await rm(directory, { recursive: true, force: true });
         }
     });
+
+    it("runs a custom test command for a non-npm repository", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "afk-agent-custom-"));
+
+        try {
+            const result = await runTests(
+                directory,
+                "node -e \"console.log('custom-check')\"",
+            );
+
+            expect(result.passed).toBe(true);
+            expect(result.stdout).toContain("custom-check");
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it("fails when the custom test command fails", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "afk-agent-custom-"));
+
+        try {
+            const result = await runTests(
+                directory,
+                'node -e "process.exit(1)"',
+            );
+
+            expect(result.passed).toBe(false);
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
 });

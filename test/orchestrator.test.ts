@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import type { ProcessResult } from "../src/process.js";
 import type { HarnessReport } from "../src/harness/report.js";
 import { removeWorktree, setupWorktree } from "../src/worktree/manager.js";
@@ -250,6 +251,19 @@ describe("runTask", () => {
 
         expect(deps?.runTests).toBe(runTests);
         expect(deps?.getChangedFiles).toBe(getChangedFiles);
+    });
+
+    it("validates with the configured test command", async () => {
+        await runTask({
+            ...input,
+            testCommand: "node -e \"console.log('custom-check')\"",
+        });
+
+        const deps = mockedRunWithRetries.mock.calls[0]?.[1];
+        const result = await deps?.runTests(tmpdir());
+
+        expect(result?.passed).toBe(true);
+        expect(result?.stdout).toContain("custom-check");
     });
 
     it("binds the agent to its own worktree, ignoring the retry path", async () => {

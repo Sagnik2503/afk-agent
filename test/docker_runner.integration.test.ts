@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdtemp, rm, copyFile, realpath, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, realpath, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { ChildProcess } from "../src/process.js";
 import {
     createDockerAgent,
@@ -16,12 +15,6 @@ const dockerReady = await ChildProcess("docker", ["info"])
     .catch(() => false);
 
 describe.skipIf(!dockerReady)("Docker agent integration", () => {
-    const sourceDockerfile = fileURLToPath(
-        new URL("../Dockerfile", import.meta.url),
-    );
-    const sourceDockerignore = fileURLToPath(
-        new URL("../.dockerignore", import.meta.url),
-    );
     const runTimeout = 5 * 60 * 1000;
     const taskId = `integration-${process.pid}-${Date.now()}`;
     const imageName = `afk-agent-integration:${process.pid}`;
@@ -34,8 +27,6 @@ describe.skipIf(!dockerReady)("Docker agent integration", () => {
         );
 
         await ChildProcess("git", ["init", "-q"], { cwd: repo });
-        await copyFile(sourceDockerfile, join(repo, "Dockerfile"));
-        await copyFile(sourceDockerignore, join(repo, ".dockerignore"));
         await ChildProcess(
             "git",
             [
