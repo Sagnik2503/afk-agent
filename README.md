@@ -182,13 +182,15 @@ All attempts are reported, and changes accumulate in the same worktree.
 
 ```bash
 npm install -g afk-agent
+cd path/to/your-repo
 afk setup
 ```
 
 `afk setup` checks Git, the Docker daemon, GitHub CLI authentication, and that
-the target path is a Git repository. It reports every failure at once with what
-to do next, then builds the Sandbox image for the installed CLI version. It
-writes no configuration and is safe to run again.
+the target path is a Git repository. The path defaults to the current directory;
+pass one (`afk setup path/to/repo`) to check a different clone. It reports every
+failure at once with what to do next, then builds the Sandbox image for the
+installed CLI version. It writes no configuration and is safe to run again.
 
 To try it without a global install:
 
@@ -208,7 +210,6 @@ fresh image on the next run instead of reusing the old agent.
 ### Run a coding task
 
 ```bash
-afk setup .
 afk run --repo . --issue 142
 ```
 

@@ -291,7 +291,7 @@ describe("createDockerAgent", () => {
                 "/repo/docker/Dockerfile",
                 "/repo/docker",
             ],
-            { timeout: 1_000 },
+            { timeout: 600_000 },
         );
 
         const runArgs = mockedChildProcess.mock.calls[3]?.[1] ?? [];

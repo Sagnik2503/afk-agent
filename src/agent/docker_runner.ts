@@ -28,22 +28,19 @@ const GIT_ENV = [
     "GIT_CONFIG_VALUE_0=*",
 ];
 
-export type DockerAgentOptions = {
-    repoPath: string;
-    taskId: string;
-    issueId: string;
-    model?: string;
-    imageName?: string;
-    dockerfilePath?: string;
-    build?: boolean;
-    env?: NodeJS.ProcessEnv;
-    timeout?: number;
-};
-
 export type PrepareImageOptions = {
     imageName?: string;
     dockerfilePath?: string;
     timeout?: number;
+};
+
+export type DockerAgentOptions = PrepareImageOptions & {
+    repoPath: string;
+    taskId: string;
+    issueId: string;
+    model?: string;
+    build?: boolean;
+    env?: NodeJS.ProcessEnv;
 };
 
 export type DockerAgent = {
@@ -324,7 +321,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
             return;
         }
 
-        await prepareSandboxImage({ imageName, dockerfilePath, timeout });
+        await prepareSandboxImage({ imageName, dockerfilePath });
     }
 
     async function run(prompt: string): Promise<ProcessResult> {

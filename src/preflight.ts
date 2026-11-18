@@ -53,7 +53,7 @@ export async function runPreflight(
         failures.push({
             check: "Docker daemon",
             guidance:
-                "Start Docker (Docker Desktop or the docker daemon) and re-run.",
+                "Install Docker and make sure the daemon is running (Docker Desktop or the docker daemon), then re-run.",
         });
     }
 
@@ -82,7 +82,7 @@ export async function runPreflight(
 
 export function formatPreflightFailures(failures: PreflightFailure[]): string {
     return [
-        "afk setup found problems:",
+        "afk found problems:",
         ...failures.map((failure) => `- ${failure.check}: ${failure.guidance}`),
     ].join("\n");
 }

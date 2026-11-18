@@ -32,6 +32,10 @@ _Avoid_: target branch, trunk
 The Docker container that runs the agent inside the worktree. A worktree alone is not a security boundary; the sandbox is.
 _Avoid_: container (when speaking about the guarantee), jail
 
+**Sandbox image**:
+The Docker image built from AFK Agent's packaged `Dockerfile`, tagged with the CLI version, that the Sandbox runs.
+_Avoid_: agent image
+
 **Sandbox logs**:
 The live stdout and stderr of a running Sandbox. They are streamed while the Sandbox exists and disappear with it; they are not the Run report.
 _Avoid_: run log, post-mortem log
