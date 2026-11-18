@@ -168,63 +168,67 @@ All attempts are reported, and changes accumulate in the same worktree.
 
 ---
 
-## Quickstart
+## Install
 
 ### Prerequisites
 
-- Node.js >=22.12.0
+- Node.js `>=22.12.0`
 - Git
-- Docker
-- GitHub CLI (`gh`)
-- OpenCode
-- An AI provider configured for OpenCode
+- Docker (the daemon must be running)
+- GitHub CLI (`gh`) authenticated with `gh auth login`
+- macOS or Linux. Windows is supported through WSL2 only; native Windows is not supported.
 
-### Setup
-
-Clone the repository and install dependencies:
+### Install the CLI
 
 ```bash
-git clone <repository-url>
-cd afk-agent
-npm install
+npm install -g afk-agent
+cd path/to/your-repo
+afk setup
 ```
 
-Authenticate with GitHub CLI:
+`afk setup` checks Git, the Docker daemon, GitHub CLI authentication, and that
+the target path is a Git repository. The path defaults to the current directory;
+pass one (`afk setup path/to/repo`) to check a different clone. It reports every
+failure at once with what to do next, then builds the Sandbox image for the
+installed CLI version. It writes no configuration and is safe to run again.
+
+To try it without a global install:
 
 ```bash
-gh auth login
-gh auth status
+npx afk-agent --help
 ```
 
-Make sure Docker is running and OpenCode has a working AI provider configuration.
-
-### Run tests
+### Update
 
 ```bash
-npm test
+npm install -g afk-agent@latest
 ```
 
-Run TypeScript checks:
-
-```bash
-npx tsc --noEmit
-```
+The Sandbox image is tagged with the CLI version, so upgrading the CLI builds a
+fresh image on the next run instead of reusing the old agent.
 
 ### Run a coding task
 
 ```bash
-npm run dev -- run --repo . --issue 142
+afk run --repo . --issue 142
 ```
 
-Replace `142` with the GitHub issue number you want the agent to work on.
+Replace `142` with the GitHub issue number you want the agent to work on. The
+target path must be a local clone whose `origin` points at the GitHub repository
+that contains the issue; the existing push and Pull request safety checks compare
+the two and refuse to push when they differ.
+
+`afk run` performs the same preflight checks as `afk setup` and builds the
+versioned Sandbox image if it is missing, so `afk setup` is a convenience rather
+than a hard gate.
 
 AFK Agent will:
 
-1. Validate the repository.
+1. Check prerequisites and validate the repository.
 2. Fetch the GitHub issue.
 3. Derive a stable task ID from the issue.
 4. Create or resume a worktree and branch.
-5. Prepare the Docker image.
+5. Prepare the versioned Docker image.
 6. Execute OpenCode.
 7. Run tests and retries.
 8. Commit any leftover changes.
@@ -234,16 +238,47 @@ AFK Agent will:
 12. Remove the worktree if the task failed, keeping the branch.
 13. Print the final execution report.
 
-Pass `--no-push` to keep the branch local; this also skips the pull request. Pass
-`--no-pr` to push the branch but skip the pull request. The issue comment is
-still posted.
+### Options
+
+| Flag                 | Purpose                                                 |
+| -------------------- | ------------------------------------------------------- |
+| `--model <model>`    | Model used inside the Sandbox.                          |
+| `--timeout <ms>`     | Agent run time limit in milliseconds.                   |
+| `--test-command <c>` | Command used to validate changes (default: `npm test`). |
+| `--image <image>`    | Use a supplied Sandbox image instead of building one.   |
+| `--no-push`          | Keep the branch local; also skips the pull request.     |
+| `--no-pr`            | Push the branch but skip the pull request.              |
+
+### Providers and credentials
+
+The default model is free and works with no API key. To use a paid provider,
+export its key and pass `--model`:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+afk run --repo . --issue 142 --model anthropic/claude
+```
+
+AFK Agent forwards only these variables into the Sandbox, and only when they are
+already present in your environment:
+
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`,
+`XAI_API_KEY` (xAI).
+
+Keys apply to a single Agent run. AFK Agent never writes them to disk, a Run
+report, an Issue comment, or a Pull request, and it does not mount your host
+OpenCode state.
+
+Docker records container environment variables, so a forwarded key is visible to
+anyone who can run `docker inspect` on that machine. This is accepted for a
+single-user local tool.
 
 ### Watch Sandbox logs
 
 Stream the live Sandbox output of a running agent in a second terminal:
 
 ```bash
-npm run dev -- logs --repo . --issue 142
+afk logs --repo . --issue 142
 ```
 
 `--issue` accepts a bare issue number or a GitHub issue URL. The command
@@ -258,6 +293,34 @@ also stops the underlying `docker logs` process.
 Sandbox logs are ephemeral. The Sandbox is disposable and is removed at the end
 of an agent run, so there is no post-mortem log file to inspect afterwards. Run
 the `logs` command while the agent is still running.
+
+---
+
+## Development
+
+Install dependencies in a clone of this repository:
+
+```bash
+npm install
+```
+
+Run tests:
+
+```bash
+npm test
+```
+
+Run TypeScript checks:
+
+```bash
+npx tsc --noEmit
+```
+
+Run the CLI from source:
+
+```bash
+npm run dev -- run --repo . --issue 142
+```
 
 ---
 

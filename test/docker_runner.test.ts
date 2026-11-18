@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import path from "node:path";
 import type { ProcessResult } from "../src/process.js";
 import { ChildProcess } from "../src/process.js";
 import {
     createDockerAgent,
+    DEFAULT_DOCKERFILE,
+    DEFAULT_IMAGE,
     watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
+import { packageVersion } from "../src/package_info.js";
 
 vi.mock("../src/process.js", () => ({
     ChildProcess: vi.fn(),
@@ -36,6 +40,10 @@ beforeEach(() => {
 });
 
 describe("createDockerAgent", () => {
+    it("tags the default image with the CLI version", () => {
+        expect(DEFAULT_IMAGE).toBe(`afk-agent:${packageVersion()}`);
+    });
+
     it("rejects an invalid task id before running Docker", () => {
         expect(() =>
             createDockerAgent({ ...options, taskId: "../escape" }),
@@ -58,7 +66,7 @@ describe("createDockerAgent", () => {
         expect(mockedChildProcess).toHaveBeenCalledTimes(1);
         expect(mockedChildProcess).toHaveBeenCalledWith(
             "docker",
-            ["image", "inspect", "afk-agent:latest"],
+            ["image", "inspect", DEFAULT_IMAGE],
             expect.anything(),
         );
     });
@@ -80,10 +88,10 @@ describe("createDockerAgent", () => {
             [
                 "build",
                 "-t",
-                "afk-agent:latest",
+                DEFAULT_IMAGE,
                 "-f",
-                "/repo/Dockerfile",
-                "/repo",
+                DEFAULT_DOCKERFILE,
+                path.dirname(DEFAULT_DOCKERFILE),
             ],
             expect.anything(),
         );
@@ -201,7 +209,7 @@ describe("createDockerAgent", () => {
     });
 
     it("produces the run argv for the task", async () => {
-        const agent = createDockerAgent(options);
+        const agent = createDockerAgent({ ...options, env: {} });
 
         await agent.run("Fix it");
 
@@ -240,7 +248,7 @@ describe("createDockerAgent", () => {
                 "GIT_CONFIG_KEY_0=safe.directory",
                 "-e",
                 "GIT_CONFIG_VALUE_0=*",
-                "afk-agent:latest",
+                DEFAULT_IMAGE,
                 "opencode",
                 "run",
                 "--auto",
@@ -249,7 +257,7 @@ describe("createDockerAgent", () => {
                 "opencode/deepseek-v4.1-flash-free",
                 "Fix it",
             ],
-            { timeout: 600_000 },
+            { timeout: 600_000, env: {} },
         );
     });
 
@@ -259,6 +267,7 @@ describe("createDockerAgent", () => {
             model: "anthropic/claude",
             imageName: "custom:1",
             dockerfilePath: "/repo/docker/Dockerfile",
+            env: {},
             timeout: 1_000,
         });
 
@@ -280,9 +289,9 @@ describe("createDockerAgent", () => {
                 "custom:1",
                 "-f",
                 "/repo/docker/Dockerfile",
-                "/repo",
+                "/repo/docker",
             ],
-            { timeout: 1_000 },
+            { timeout: 600_000 },
         );
 
         const runArgs = mockedChildProcess.mock.calls[3]?.[1] ?? [];
@@ -290,7 +299,50 @@ describe("createDockerAgent", () => {
         expect(runArgs).toContain("anthropic/claude");
         expect(mockedChildProcess.mock.calls[3]?.[2]).toEqual({
             timeout: 1_000,
+            env: {},
         });
+    });
+
+    it("skips the build when a prebuilt image is supplied", async () => {
+        const agent = createDockerAgent({
+            ...options,
+            imageName: "custom:1",
+            build: false,
+        });
+
+        await agent.prepareImage();
+
+        expect(mockedChildProcess).not.toHaveBeenCalled();
+    });
+
+    it("forwards only allowlisted provider keys by name", async () => {
+        const agent = createDockerAgent({
+            ...options,
+            env: {
+                ANTHROPIC_API_KEY: "anthropic-secret",
+                XAI_API_KEY: "xai-secret",
+                UNRELATED_SECRET: "do-not-forward",
+            },
+        });
+
+        await agent.run("Fix it");
+
+        const runArgs = mockedChildProcess.mock.calls[1]?.[1] ?? [];
+        const joined = runArgs.join("\n");
+
+        expect(runArgs).toContain("ANTHROPIC_API_KEY");
+        expect(runArgs).toContain("XAI_API_KEY");
+        expect(joined).not.toContain("OPENAI_API_KEY");
+        expect(joined).not.toContain("UNRELATED_SECRET");
+        expect(joined).not.toContain("anthropic-secret");
+        expect(joined).not.toContain("do-not-forward");
+        expect(mockedChildProcess.mock.calls[1]?.[2]).toEqual(
+            expect.objectContaining({
+                env: expect.objectContaining({
+                    ANTHROPIC_API_KEY: "anthropic-secret",
+                }),
+            }),
+        );
     });
 
     it("returns the process result unchanged", async () => {

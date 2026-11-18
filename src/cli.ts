@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { runTask } from "./harness/orchestrator.js";
 import {
     deriveTaskId,
@@ -8,8 +8,37 @@ import {
 } from "./github/fetch_issues.js";
 import { validateRepository } from "./github/repo_validation.js";
 import { buildIssuePrompt } from "./agent/prompt.js";
-import { watchSandboxLogs } from "./agent/docker_runner.js";
+import {
+    DEFAULT_IMAGE,
+    prepareSandboxImage,
+    watchSandboxLogs,
+} from "./agent/docker_runner.js";
 import { packageVersion } from "./package_info.js";
+import { formatPreflightFailures, runPreflight } from "./preflight.js";
+
+function parseTimeout(value: string): number {
+    const timeout = Number(value);
+
+    if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+        throw new InvalidArgumentError(
+            "Timeout must be a positive integer of milliseconds.",
+        );
+    }
+
+    return timeout;
+}
+
+async function reportPreflight(repoPath: string): Promise<boolean> {
+    const failures = await runPreflight({ repoPath });
+
+    if (failures.length > 0) {
+        console.error(formatPreflightFailures(failures));
+        process.exitCode = 1;
+        return false;
+    }
+
+    return true;
+}
 
 const program = new Command();
 
@@ -19,14 +48,54 @@ program
     .version(packageVersion());
 
 program
+    .command("setup")
+    .description("Check prerequisites and build the Sandbox image")
+    .argument("[path]", "repository path", ".")
+    .action(async (repoPath: string) => {
+        try {
+            if (!(await reportPreflight(repoPath))) {
+                return;
+            }
+
+            console.log("All checks passed. Building Sandbox image...");
+            await prepareSandboxImage();
+            console.log("Sandbox image ready:", DEFAULT_IMAGE);
+        } catch (error) {
+            console.error(
+                "AFK setup failed:",
+                error instanceof Error ? error.message : error,
+            );
+            process.exitCode = 1;
+        }
+    });
+
+program
     .command("run")
     .description("Run an AFK coding task")
     .requiredOption("--repo <path>", "Repository path")
     .requiredOption("--issue <id>", "GitHub issue ID")
+    .option("--model <model>", "Model to use inside the Sandbox")
+    .option(
+        "--timeout <ms>",
+        "Agent run timeout in milliseconds (default: 600000)",
+        parseTimeout,
+    )
+    .option(
+        "--test-command <command>",
+        "Command used to validate changes (default: npm test)",
+    )
+    .option(
+        "--image <image>",
+        "Use a prebuilt Sandbox image instead of building",
+    )
     .option("--no-push", "Skip pushing the branch to GitHub")
     .option("--no-pr", "Skip opening a pull request")
     .action(async (options) => {
         try {
+            if (!(await reportPreflight(options.repo))) {
+                return;
+            }
+
             const repoPath = await validateRepository(options.repo);
             console.log("Validated repository:", repoPath);
 
@@ -49,6 +118,18 @@ program
                 prompt,
                 push: options.push !== false,
                 pr: options.pr !== false,
+                ...(options.model !== undefined
+                    ? { model: options.model }
+                    : {}),
+                ...(options.timeout !== undefined
+                    ? { timeout: options.timeout }
+                    : {}),
+                ...(options.testCommand !== undefined
+                    ? { testCommand: options.testCommand }
+                    : {}),
+                ...(options.image !== undefined
+                    ? { imageName: options.image, build: false }
+                    : {}),
             });
 
             // 4. Display report

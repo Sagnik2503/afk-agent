@@ -37,7 +37,9 @@ export type RunTaskInput = {
     pr?: boolean;
     model?: string;
     imageName?: string;
+    build?: boolean;
     timeout?: number;
+    testCommand?: string;
 };
 
 export type RunTaskDependencies = {
@@ -307,6 +309,9 @@ export async function runTask(
     if (input.imageName !== undefined) {
         agentOptions.imageName = input.imageName;
     }
+    if (input.build !== undefined) {
+        agentOptions.build = input.build;
+    }
     if (input.timeout !== undefined) {
         agentOptions.timeout = input.timeout;
     }
@@ -344,7 +349,11 @@ export async function runTask(
             },
             {
                 runAgent: (_worktreePath, prompt) => agent.run(prompt),
-                runTests,
+                runTests:
+                    input.testCommand === undefined
+                        ? runTests
+                        : (worktreePath: string) =>
+                              runTests(worktreePath, input.testCommand),
                 getChangedFiles,
             },
         );

@@ -1,10 +1,22 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { packageVersion } from "../package_info.js";
 import { ChildProcess, type ProcessResult } from "../process.js";
 
 export const DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free";
-export const DEFAULT_IMAGE = "afk-agent:latest";
+export const DEFAULT_IMAGE = `afk-agent:${packageVersion()}`;
+export const DEFAULT_DOCKERFILE = fileURLToPath(
+    new URL("../../Dockerfile", import.meta.url),
+);
 export const DEFAULT_TIMEOUT = 10 * 60 * 1000;
 const CLEANUP_TIMEOUT = 10_000;
+const PROVIDER_KEY_ENV = [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GEMINI_API_KEY",
+    "XAI_API_KEY",
+];
 const GIT_ENV = [
     "GIT_AUTHOR_NAME=afk-agent",
     "GIT_AUTHOR_EMAIL=afk-agent@localhost",
@@ -16,14 +28,19 @@ const GIT_ENV = [
     "GIT_CONFIG_VALUE_0=*",
 ];
 
-export type DockerAgentOptions = {
+export type PrepareImageOptions = {
+    imageName?: string;
+    dockerfilePath?: string;
+    timeout?: number;
+};
+
+export type DockerAgentOptions = PrepareImageOptions & {
     repoPath: string;
     taskId: string;
     issueId: string;
     model?: string;
-    imageName?: string;
-    dockerfilePath?: string;
-    timeout?: number;
+    build?: boolean;
+    env?: NodeJS.ProcessEnv;
 };
 
 export type DockerAgent = {
@@ -211,6 +228,45 @@ export async function watchSandboxLogs(
     throw new Error(`Unable to stream container logs: ${result.stderr.trim()}`);
 }
 
+export async function prepareSandboxImage(
+    options: PrepareImageOptions = {},
+): Promise<void> {
+    const imageName = options.imageName ?? DEFAULT_IMAGE;
+    const dockerfilePath = options.dockerfilePath ?? DEFAULT_DOCKERFILE;
+    const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+    const buildContext = path.dirname(dockerfilePath);
+
+    const inspected = await ChildProcess(
+        "docker",
+        ["image", "inspect", imageName],
+        { timeout },
+    );
+
+    if (inspected.exitCode === 0) {
+        return;
+    }
+
+    if (inspected.timedOut) {
+        throw new Error(
+            `Docker image inspection timed out: ${inspected.stderr}`,
+        );
+    }
+
+    if (!inspected.stderr.includes("No such image")) {
+        throw new Error(`Docker image inspection failed: ${inspected.stderr}`);
+    }
+
+    const build = await ChildProcess(
+        "docker",
+        ["build", "-t", imageName, "-f", dockerfilePath, buildContext],
+        { timeout },
+    );
+
+    if (build.timedOut || build.exitCode !== 0) {
+        throw new Error(`Docker image build failed: ${build.stderr}`);
+    }
+}
+
 export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     if (!/^[a-zA-Z0-9_-]+$/.test(options.taskId)) {
         throw new Error("Invalid task ID");
@@ -232,12 +288,16 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     const gitDir = path.resolve(repoPath, ".git");
     const model = options.model ?? DEFAULT_MODEL;
     const imageName = options.imageName ?? DEFAULT_IMAGE;
+    const buildImage = options.build ?? true;
 
-    const dockerfilePath =
-        options.dockerfilePath ?? path.resolve(repoPath, "Dockerfile");
+    const dockerfilePath = options.dockerfilePath ?? DEFAULT_DOCKERFILE;
 
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const containerName = `afk-${options.taskId}`;
+    const env = options.env ?? process.env;
+    const providerEnv = PROVIDER_KEY_ENV.filter(
+        (key) => env[key] !== undefined,
+    ).flatMap((key) => ["-e", key]);
 
     async function removeContainer(): Promise<void> {
         const result = await ChildProcess(
@@ -257,37 +317,11 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     }
 
     async function prepareImage(): Promise<void> {
-        const inspected = await ChildProcess(
-            "docker",
-            ["image", "inspect", imageName],
-            { timeout },
-        );
-
-        if (inspected.exitCode === 0) {
+        if (!buildImage) {
             return;
         }
 
-        if (inspected.timedOut) {
-            throw new Error(
-                `Docker image inspection timed out: ${inspected.stderr}`,
-            );
-        }
-
-        if (!inspected.stderr.includes("No such image")) {
-            throw new Error(
-                `Docker image inspection failed: ${inspected.stderr}`,
-            );
-        }
-
-        const build = await ChildProcess(
-            "docker",
-            ["build", "-t", imageName, "-f", dockerfilePath, repoPath],
-            { timeout },
-        );
-
-        if (build.timedOut || build.exitCode !== 0) {
-            throw new Error(`Docker image build failed: ${build.stderr}`);
-        }
+        await prepareSandboxImage({ imageName, dockerfilePath });
     }
 
     async function run(prompt: string): Promise<ProcessResult> {
@@ -317,6 +351,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
                     "-e",
                     `AFK_ISSUE_ID=${options.issueId}`,
                     ...GIT_ENV.flatMap((value) => ["-e", value]),
+                    ...providerEnv,
                     imageName,
                     "opencode",
                     "run",
@@ -326,7 +361,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
                     model,
                     prompt,
                 ],
-                { timeout },
+                { timeout, env },
             );
         } catch (error) {
             executionError = error;
