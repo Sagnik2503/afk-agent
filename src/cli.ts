@@ -40,7 +40,32 @@ async function reportPreflight(repoPath: string): Promise<boolean> {
     return true;
 }
 
+const commandExamples: Record<string, string> = {
+    setup: "afk setup",
+    run: "afk run --repo . --issue 142",
+    logs: "afk logs --repo . --issue 142",
+};
+
 const program = new Command();
+
+function printOverview(): void {
+    console.log(`${program.name()} ${packageVersion()}`);
+    console.log(program.description());
+    console.log("");
+    console.log("Commands:");
+
+    for (const [name, example] of Object.entries(commandExamples)) {
+        const command = program.commands.find((item) => item.name() === name);
+
+        if (command) {
+            console.log(`  ${name.padEnd(6)}${command.description()}`);
+            console.log(`         Example: ${example}`);
+        }
+    }
+
+    console.log("");
+    console.log("Run 'afk help <command>' for command details.");
+}
 
 program
     .name("afk-agent")
@@ -235,6 +260,31 @@ program
             process.off("SIGINT", onSignal);
             process.off("SIGTERM", onSignal);
         }
+    });
+
+program.action(() => {
+    printOverview();
+});
+
+program
+    .command("help [command]")
+    .description("Display help for a command")
+    .action((commandName?: string) => {
+        if (commandName === undefined) {
+            printOverview();
+            return;
+        }
+
+        const command = program.commands.find(
+            (item) => item.name() === commandName,
+        );
+
+        if (!command) {
+            program.error(`error: unknown command '${commandName}'`);
+            return;
+        }
+
+        command.help();
     });
 
 program.parse();
