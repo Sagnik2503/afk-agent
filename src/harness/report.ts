@@ -33,7 +33,9 @@ export function buildReport(input: ReportInput): HarnessReport {
     const success = executionStatus === "completed" && testResult.passed;
     const reasons: string[] = [];
 
-    if (agentResult.timedOut) {
+    if (agentResult.resourceLimit) {
+        reasons.push(agentResult.resourceLimit.message);
+    } else if (agentResult.timedOut) {
         reasons.push("agent timed out");
     } else if (agentResult.exitCode !== 0) {
         reasons.push(

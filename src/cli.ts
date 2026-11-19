@@ -9,7 +9,13 @@ import {
 import { validateRepository } from "./github/repo_validation.js";
 import { buildIssuePrompt } from "./agent/prompt.js";
 import {
+    DEFAULT_CPUS,
     DEFAULT_IMAGE,
+    DEFAULT_MEMORY,
+    DEFAULT_PIDS_LIMIT,
+    parseCpusLimit,
+    parseMemoryLimit,
+    parsePidsLimit,
     prepareSandboxImage,
     watchSandboxLogs,
 } from "./agent/docker_runner.js";
@@ -27,6 +33,22 @@ function parseTimeout(value: string): number {
 
     return timeout;
 }
+
+function argumentParser<T>(parse: (value: string) => T): (value: string) => T {
+    return (value: string): T => {
+        try {
+            return parse(value);
+        } catch (error) {
+            throw new InvalidArgumentError(
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+    };
+}
+
+const parseMemory = argumentParser(parseMemoryLimit);
+const parseCpus = argumentParser(parseCpusLimit);
+const parsePids = argumentParser(parsePidsLimit);
 
 async function reportPreflight(repoPath: string): Promise<boolean> {
     const failures = await runPreflight({ repoPath });
@@ -81,6 +103,21 @@ program
         parseTimeout,
     )
     .option(
+        "--memory <size>",
+        `Sandbox memory limit, e.g. 2g (default: ${DEFAULT_MEMORY})`,
+        parseMemory,
+    )
+    .option(
+        "--cpus <count>",
+        `Sandbox CPU limit (default: ${DEFAULT_CPUS})`,
+        parseCpus,
+    )
+    .option(
+        "--pids-limit <count>",
+        `Sandbox process limit (default: ${DEFAULT_PIDS_LIMIT})`,
+        parsePids,
+    )
+    .option(
         "--test-command <command>",
         "Command used to validate changes (default: npm test)",
     )
@@ -123,6 +160,13 @@ program
                     : {}),
                 ...(options.timeout !== undefined
                     ? { timeout: options.timeout }
+                    : {}),
+                ...(options.memory !== undefined
+                    ? { memory: options.memory }
+                    : {}),
+                ...(options.cpus !== undefined ? { cpus: options.cpus } : {}),
+                ...(options.pidsLimit !== undefined
+                    ? { pidsLimit: options.pidsLimit }
                     : {}),
                 ...(options.testCommand !== undefined
                     ? { testCommand: options.testCommand }

@@ -70,6 +70,30 @@ describe("buildReport", () => {
         expect(report.reasons).toContain("agent exited with code 2");
     });
 
+    it("names a resource limit kill and hints how to raise it", () => {
+        const report = buildReport({
+            taskId: "task-1",
+            agentResult: makeAgentResult({
+                exitCode: 137,
+                resourceLimit: {
+                    kind: "memory",
+                    value: "2g",
+                    message:
+                        "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+                },
+            }),
+            testResult: makeTestResult(),
+            changedFiles: ["src/a.ts"],
+        });
+
+        expect(report.success).toBe(false);
+        expect(report.executionStatus).toBe("failed");
+        expect(report.reasons).toContain(
+            "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+        );
+        expect(report.reasons).not.toContain("agent exited with code 137");
+    });
+
     it("reports failure when the agent was killed without timing out", () => {
         const report = buildReport({
             taskId: "task-1",

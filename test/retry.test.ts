@@ -102,6 +102,30 @@ describe("runWithRetries", () => {
         expect(deps.getChangedFiles).toHaveBeenCalledTimes(1);
     });
 
+    it("stops after a resource limit kill without retrying", async () => {
+        const deps = makeDeps();
+        deps.runAgent.mockResolvedValue(
+            agentResult({
+                exitCode: 137,
+                resourceLimit: {
+                    kind: "memory",
+                    value: "2g",
+                    message:
+                        "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+                },
+            }),
+        );
+
+        const { reports } = await runWithRetries(input, deps);
+
+        expect(reports).toHaveLength(1);
+        expect(reports[0]?.success).toBe(false);
+        expect(reports[0]?.reasons).toContain(
+            "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+        );
+        expect(deps.runAgent).toHaveBeenCalledTimes(1);
+    });
+
     it("stops after an agent timeout even if tests pass", async () => {
         const deps = makeDeps();
         deps.runAgent.mockResolvedValue(

@@ -244,10 +244,22 @@ AFK Agent will:
 | -------------------- | ------------------------------------------------------- |
 | `--model <model>`    | Model used inside the Sandbox.                          |
 | `--timeout <ms>`     | Agent run time limit in milliseconds.                   |
+| `--memory <size>`    | Sandbox memory ceiling, e.g. `2g` (default: `2g`).      |
+| `--cpus <count>`     | Sandbox CPU ceiling (default: `2`).                     |
+| `--pids-limit <n>`   | Sandbox process-count ceiling (default: `512`).         |
 | `--test-command <c>` | Command used to validate changes (default: `npm test`). |
 | `--image <image>`    | Use a supplied Sandbox image instead of building one.   |
 | `--no-push`          | Keep the branch local; also skips the pull request.     |
 | `--no-pr`            | Push the branch but skip the pull request.              |
+
+Every Sandbox starts with a memory, CPU, and process-count ceiling so an
+unattended agent run cannot exhaust the host. The defaults are 2g of memory,
+2 CPUs, and 512 processes; the `--memory`, `--cpus`, and `--pids-limit` flags
+override them for a single run. Memory accepts a positive number with an
+optional `b`, `k`, `m`, or `g` unit, CPUs accept a positive decimal, and the
+process limit accepts a positive integer. Invalid values are rejected before
+the Sandbox starts. If an Attempt is killed for exceeding a limit, it stops
+without retrying and the report names the limit and the flag to raise.
 
 ### Providers and credentials
 

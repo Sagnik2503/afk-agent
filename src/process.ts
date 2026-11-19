@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
 
+export type ResourceLimit = {
+    kind: "memory" | "cpus" | "pids";
+    value: string;
+    message: string;
+};
+
 export type ProcessResult = {
     stdout: string;
     stderr: string;
@@ -7,6 +13,7 @@ export type ProcessResult = {
     signal: NodeJS.Signals | null;
     timedOut: boolean;
     outputTruncated: boolean;
+    resourceLimit?: ResourceLimit;
 };
 
 export type ProcessOptions = {

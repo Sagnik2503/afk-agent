@@ -235,6 +235,24 @@ describe("runTask", () => {
         });
     });
 
+    it("passes resource limit overrides through to the agent", async () => {
+        await runTask({
+            ...input,
+            memory: "4g",
+            cpus: "0.5",
+            pidsLimit: "1024",
+        });
+
+        expect(mockedCreateDockerAgent).toHaveBeenCalledWith({
+            repoPath: "/repo",
+            taskId: input.taskId,
+            issueId: input.issueId,
+            memory: "4g",
+            cpus: "0.5",
+            pidsLimit: "1024",
+        });
+    });
+
     it("runs retries with the task, worktree, prompt, and host validators", async () => {
         await runTask(input);
 

@@ -36,6 +36,9 @@ export type RunTaskInput = {
     push?: boolean;
     pr?: boolean;
     model?: string;
+    memory?: string;
+    cpus?: string;
+    pidsLimit?: string;
     imageName?: string;
     build?: boolean;
     timeout?: number;
@@ -305,6 +308,15 @@ export async function runTask(
     };
     if (input.model !== undefined) {
         agentOptions.model = input.model;
+    }
+    if (input.memory !== undefined) {
+        agentOptions.memory = input.memory;
+    }
+    if (input.cpus !== undefined) {
+        agentOptions.cpus = input.cpus;
+    }
+    if (input.pidsLimit !== undefined) {
+        agentOptions.pidsLimit = input.pidsLimit;
     }
     if (input.imageName !== undefined) {
         agentOptions.imageName = input.imageName;
