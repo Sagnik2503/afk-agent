@@ -15,6 +15,7 @@ import {
 } from "./agent/docker_runner.js";
 import { packageVersion } from "./package_info.js";
 import { formatPreflightFailures, runPreflight } from "./preflight.js";
+import { acquireTaskLock, releaseTaskLock } from "./harness/lock.js";
 
 function parseTimeout(value: string): number {
     const timeout = Number(value);
@@ -110,88 +111,124 @@ program
             const prompt = buildIssuePrompt(issue);
 
             // 3. Execute task
-            const result = await runTask({
+            const taskId = deriveTaskId(issue);
+            await acquireTaskLock({
                 repoPath,
-                taskId: deriveTaskId(issue),
+                taskId,
                 issueId: options.issue,
-                issue,
-                prompt,
-                push: options.push !== false,
-                pr: options.pr !== false,
-                ...(options.model !== undefined
-                    ? { model: options.model }
-                    : {}),
-                ...(options.timeout !== undefined
-                    ? { timeout: options.timeout }
-                    : {}),
-                ...(options.testCommand !== undefined
-                    ? { testCommand: options.testCommand }
-                    : {}),
-                ...(options.image !== undefined
-                    ? { imageName: options.image, build: false }
-                    : {}),
             });
 
-            // 4. Display report
-            const lastReport = result.reports.at(-1);
-
-            console.log("\n--- AFK Agent Report ---");
-            console.log("Branch:", result.branchName);
-            console.log(
-                "Worktree:",
-                result.worktreeRemoved
-                    ? "removed (branch kept)"
-                    : result.worktreePath,
-            );
-            if (result.cleanupError) {
-                console.error("Worktree cleanup failed:", result.cleanupError);
-            }
-            console.log("Attempts:", result.reports.length);
-
-            if (result.sync) {
-                console.log(
-                    "GitHub:",
-                    result.sync.pushed
-                        ? result.sync.branchUrl
-                        : `not pushed (${result.sync.pushError})`,
+            const onSigint = (): void => {
+                process.off("SIGINT", onSigint);
+                process.off("SIGTERM", onSigterm);
+                void releaseTaskLock({ repoPath, taskId }).finally(() =>
+                    process.exit(130),
                 );
-                if (!result.sync.commented) {
+            };
+            const onSigterm = (): void => {
+                process.off("SIGINT", onSigint);
+                process.off("SIGTERM", onSigterm);
+                void releaseTaskLock({ repoPath, taskId }).finally(() =>
+                    process.exit(143),
+                );
+            };
+            process.on("SIGINT", onSigint);
+            process.on("SIGTERM", onSigterm);
+
+            try {
+                const result = await runTask({
+                    repoPath,
+                    taskId,
+                    issueId: options.issue,
+                    issue,
+                    prompt,
+                    push: options.push !== false,
+                    pr: options.pr !== false,
+                    ...(options.model !== undefined
+                        ? { model: options.model }
+                        : {}),
+                    ...(options.timeout !== undefined
+                        ? { timeout: options.timeout }
+                        : {}),
+                    ...(options.testCommand !== undefined
+                        ? { testCommand: options.testCommand }
+                        : {}),
+                    ...(options.image !== undefined
+                        ? { imageName: options.image, build: false }
+                        : {}),
+                });
+
+                // 4. Display report
+                const lastReport = result.reports.at(-1);
+
+                console.log("\n--- AFK Agent Report ---");
+                console.log("Branch:", result.branchName);
+                console.log(
+                    "Worktree:",
+                    result.worktreeRemoved
+                        ? "removed (branch kept)"
+                        : result.worktreePath,
+                );
+                if (result.cleanupError) {
                     console.error(
-                        "Issue comment failed:",
-                        result.sync.commentError,
+                        "Worktree cleanup failed:",
+                        result.cleanupError,
                     );
                 }
-                if (result.sync.prUrl) {
-                    console.log("Pull request:", result.sync.prUrl);
+                console.log("Attempts:", result.reports.length);
+
+                if (result.sync) {
+                    console.log(
+                        "GitHub:",
+                        result.sync.pushed
+                            ? result.sync.branchUrl
+                            : `not pushed (${result.sync.pushError})`,
+                    );
+                    if (!result.sync.commented) {
+                        console.error(
+                            "Issue comment failed:",
+                            result.sync.commentError,
+                        );
+                    }
+                    if (result.sync.prUrl) {
+                        console.log("Pull request:", result.sync.prUrl);
+                    }
+                    if (result.sync.prError) {
+                        console.warn(
+                            "Pull request warning:",
+                            result.sync.prError,
+                        );
+                    }
                 }
-                if (result.sync.prError) {
-                    console.warn("Pull request warning:", result.sync.prError);
+
+                const pushFailed =
+                    result.sync !== null &&
+                    !result.sync.pushed &&
+                    options.push !== false;
+
+                if (result.error) {
+                    console.error("Execution error:", result.error);
+                    process.exitCode = 1;
+                } else if (!lastReport?.success) {
+                    console.log("Status: FAILED");
+                    process.exitCode = 1;
+                } else if (pushFailed) {
+                    console.error(
+                        "Status: FAILED (tests passed, GitHub sync failed)",
+                    );
+                    process.exitCode = 1;
+                } else {
+                    console.log("Status: SUCCESS");
                 }
-            }
 
-            const pushFailed =
-                result.sync !== null &&
-                !result.sync.pushed &&
-                options.push !== false;
-
-            if (result.error) {
-                console.error("Execution error:", result.error);
-                process.exitCode = 1;
-            } else if (!lastReport?.success) {
-                console.log("Status: FAILED");
-                process.exitCode = 1;
-            } else if (pushFailed) {
-                console.error(
-                    "Status: FAILED (tests passed, GitHub sync failed)",
-                );
-                process.exitCode = 1;
-            } else {
-                console.log("Status: SUCCESS");
-            }
-
-            if (lastReport) {
-                console.log("Changed files:", lastReport.changedFiles);
-                console.log("Reasons:", lastReport.reasons);
+                if (lastReport) {
+                    console.log("Changed files:", lastReport.changedFiles);
+                    console.log("Reasons:", lastReport.reasons);
+                }
+            } finally {
+                process.off("SIGINT", onSigint);
+                process.off("SIGTERM", onSigterm);
+                await releaseTaskLock({ repoPath, taskId });
             }
         } catch (error) {
             console.error(
