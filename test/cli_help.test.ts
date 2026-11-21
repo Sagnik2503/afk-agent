@@ -34,10 +34,13 @@ describe("afk command overview", () => {
         const { code, stdout } = await runCli([]);
 
         expect(code).toBe(0);
+        expect(stdout).toContain(packageVersion());
+        expect(stdout).toContain("A safe, bounded AFK coding agent");
         expect(stdout).toContain("setup");
         expect(stdout).toContain("run");
         expect(stdout).toContain("logs");
         expect(stdout).toContain("afk run --repo . --issue 142");
+        expect(stdout).not.toContain("\u001b[");
     });
 
     it("prints the same overview for `afk help`", async () => {

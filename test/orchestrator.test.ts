@@ -201,6 +201,17 @@ describe("runTask", () => {
         expect(imageOrder).toBeLessThan(retryOrder);
     });
 
+    it("announces image preparation and sandbox execution phases", async () => {
+        const phases: string[] = [];
+
+        await runTask({
+            ...input,
+            onPhase: (phase) => phases.push(phase),
+        });
+
+        expect(phases).toEqual(["image", "sandbox"]);
+    });
+
     it("passes the resolved repo path to the agent and worktree manager", async () => {
         await runTask({ ...input, repoPath: "relative/repo" });
 

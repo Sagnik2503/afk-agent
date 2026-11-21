@@ -22,6 +22,8 @@ import {
 import { packageVersion } from "./package_info.js";
 import { formatPreflightFailures, runPreflight } from "./preflight.js";
 import { acquireTaskLock, releaseTaskLock } from "./harness/lock.js";
+import { createColors } from "./ui/color.js";
+import { formatRunReport } from "./ui/report.js";
 
 function parseTimeout(value: string): number {
     const timeout = Number(value);
@@ -71,9 +73,20 @@ const commandExamples: Record<string, string> = {
 
 const program = new Command();
 
+const colors = createColors({
+    isTTY: process.stdout.isTTY === true,
+    env: process.env,
+});
+
+function printPhase(label: string): void {
+    console.log(colors.cyan(`→ ${label}…`));
+}
+
 function printOverview(): void {
-    console.log(`${program.name()} ${packageVersion()}`);
-    console.log(program.description());
+    console.log(
+        `${colors.bold(program.name())} ${colors.dim(packageVersion())}`,
+    );
+    console.log(colors.dim(program.description()));
     console.log("");
     console.log("Commands:");
 
@@ -155,14 +168,16 @@ program
     .option("--no-pr", "Skip opening a pull request")
     .action(async (options) => {
         try {
+            printPhase("Validating repository");
             if (!(await reportPreflight(options.repo))) {
                 return;
             }
 
             const repoPath = await validateRepository(options.repo);
-            console.log("Validated repository:", repoPath);
+            console.log("Repository:", repoPath);
 
             // 1. Fetch GitHub issue
+            printPhase(`Fetching Issue #${options.issue}`);
             const issue = await fetchGitHubIssue(repoPath, options.issue);
 
             console.log("\n--- GitHub Issue ---");
@@ -204,6 +219,12 @@ program
                     issueId: options.issue,
                     issue,
                     prompt,
+                    onPhase: (phase) =>
+                        printPhase(
+                            phase === "image"
+                                ? "Preparing Sandbox image"
+                                : "Running Sandbox",
+                        ),
                     push: options.push !== false,
                     pr: options.pr !== false,
                     ...(options.model !== undefined
@@ -230,72 +251,14 @@ program
                 });
 
                 // 4. Display report
-                const lastReport = result.reports.at(-1);
+                const report = formatRunReport(result, {
+                    pushEnabled: options.push !== false,
+                    color: colors,
+                });
 
-                console.log("\n--- AFK Agent Report ---");
-                console.log("Branch:", result.branchName);
-                console.log(
-                    "Worktree:",
-                    result.worktreeRemoved
-                        ? "removed (branch kept)"
-                        : result.worktreePath,
-                );
-                if (result.cleanupError) {
-                    console.error(
-                        "Worktree cleanup failed:",
-                        result.cleanupError,
-                    );
-                }
-                console.log("Attempts:", result.reports.length);
-
-                if (result.sync) {
-                    console.log(
-                        "GitHub:",
-                        result.sync.pushed
-                            ? result.sync.branchUrl
-                            : `not pushed (${result.sync.pushError})`,
-                    );
-                    if (!result.sync.commented) {
-                        console.error(
-                            "Issue comment failed:",
-                            result.sync.commentError,
-                        );
-                    }
-                    if (result.sync.prUrl) {
-                        console.log("Pull request:", result.sync.prUrl);
-                    }
-                    if (result.sync.prError) {
-                        console.warn(
-                            "Pull request warning:",
-                            result.sync.prError,
-                        );
-                    }
-                }
-
-                const pushFailed =
-                    result.sync !== null &&
-                    !result.sync.pushed &&
-                    options.push !== false;
-
-                if (result.error) {
-                    console.error("Execution error:", result.error);
-                    process.exitCode = 1;
-                } else if (!lastReport?.success) {
-                    console.log("Status: FAILED");
-                    process.exitCode = 1;
-                } else if (pushFailed) {
-                    console.error(
-                        "Status: FAILED (tests passed, GitHub sync failed)",
-                    );
-                    process.exitCode = 1;
-                } else {
-                    console.log("Status: SUCCESS");
-                }
-
-                if (lastReport) {
-                    console.log("Changed files:", lastReport.changedFiles);
-                    console.log("Reasons:", lastReport.reasons);
-                }
+                console.log("");
+                console.log(report.text);
+                process.exitCode = report.exitCode;
             } finally {
                 process.off("SIGINT", onSigint);
                 process.off("SIGTERM", onSigterm);
@@ -325,6 +288,12 @@ program
         try {
             const issueNumber = parseIssueNumber(options.issue);
             const repoPath = await validateRepository(options.repo);
+
+            console.log(
+                colors.cyan(
+                    `Sandbox logs for Issue #${issueNumber} in ${repoPath}`,
+                ),
+            );
 
             await watchSandboxLogs({
                 repoPath,

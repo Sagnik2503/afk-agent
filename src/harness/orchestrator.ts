@@ -27,11 +27,14 @@ import type { HarnessReport } from "./report.js";
 import { runWithRetries } from "./retry.js";
 import { runTests } from "./validation.js";
 
+export type RunPhase = "image" | "sandbox";
+
 export type RunTaskInput = {
     repoPath: string;
     taskId?: string;
     issueId: string;
     prompt: string;
+    onPhase?: (phase: RunPhase) => void;
     issue?: GitHubIssue;
     push?: boolean;
     pr?: boolean;
@@ -333,6 +336,7 @@ export async function runTask(
     const { branchName, worktreePath } = await setupWorktree(repoPath, taskId);
 
     try {
+        input.onPhase?.("image");
         await agent.prepareImage();
     } catch (error) {
         await disposeAfterFailure(
@@ -353,6 +357,7 @@ export async function runTask(
     let retryResult;
 
     try {
+        input.onPhase?.("sandbox");
         retryResult = await runWithRetries(
             {
                 taskId,
