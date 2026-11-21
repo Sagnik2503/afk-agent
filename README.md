@@ -182,15 +182,17 @@ All attempts are reported, and changes accumulate in the same worktree.
 
 ```bash
 npm install -g afk-agent
+afk --version
 cd path/to/your-repo
 afk setup
 ```
 
-`afk setup` checks Git, the Docker daemon, GitHub CLI authentication, and that
-the target path is a Git repository. The path defaults to the current directory;
-pass one (`afk setup path/to/repo`) to check a different clone. It reports every
-failure at once with what to do next, then builds the Sandbox image for the
-installed CLI version. It writes no configuration and is safe to run again.
+`afk --version` prints the installed release. `afk setup` checks Git, the Docker
+daemon, GitHub CLI authentication, and that the target path is a Git repository.
+The path defaults to the current directory; pass one (`afk setup path/to/repo`)
+to check a different clone. It reports every failure at once with what to do
+next, then builds the Sandbox image for the installed CLI version. It writes no
+configuration and is safe to run again.
 
 To try it without a global install:
 
@@ -333,6 +335,18 @@ Run the CLI from source:
 ```bash
 npm run dev -- run --repo . --issue 142
 ```
+
+### Releasing
+
+Releases are published to npm by the `Publish` workflow. To cut one:
+
+1. Bump `version` in `package.json` and commit the change.
+2. Push a tag matching the version, for example `v0.2.0` for version `0.2.0`.
+3. Store an npm automation token in the repository's `NPM_TOKEN` secret.
+
+The workflow runs the same quality checks as CI, verifies the tag matches the
+manifest version, and only then publishes the package. A missing `NPM_TOKEN`
+secret fails the job before publishing with a clear error.
 
 ---
 
