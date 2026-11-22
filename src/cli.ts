@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { open, mkdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
 import { runTask } from "./harness/orchestrator.js";
 import {
@@ -21,7 +25,20 @@ import {
 } from "./agent/docker_runner.js";
 import { packageVersion } from "./package_info.js";
 import { formatPreflightFailures, runPreflight } from "./preflight.js";
-import { acquireTaskLock, releaseTaskLock } from "./harness/lock.js";
+import {
+    acquireTaskLock,
+    releaseTaskLock,
+    transferTaskLock,
+} from "./harness/lock.js";
+import {
+    findRunForIssue,
+    formatRunDetail,
+    formatRunList,
+    listRunRecords,
+    resolveRunState,
+    runLogPath,
+    updateRunRecord,
+} from "./harness/run_record.js";
 
 function parseTimeout(value: string): number {
     const timeout = Number(value);
@@ -67,7 +84,145 @@ const commandExamples: Record<string, string> = {
     setup: "afk setup",
     run: "afk run --repo . --issue 142",
     logs: "afk logs --repo . --issue 142",
+    status: "afk status --repo .",
 };
+
+type RunOptions = {
+    repo: string;
+    issue: string;
+    model?: string;
+    timeout?: number;
+    memory?: string;
+    cpus?: string;
+    pidsLimit?: string;
+    testCommand?: string;
+    image?: string;
+    push?: boolean;
+    pr?: boolean;
+    background?: boolean;
+};
+
+function backgroundChildArgs(options: RunOptions): string[] {
+    const args = ["run", "--repo", options.repo, "--issue", options.issue];
+
+    if (options.model !== undefined) {
+        args.push("--model", options.model);
+    }
+    if (options.timeout !== undefined) {
+        args.push("--timeout", String(options.timeout));
+    }
+    if (options.memory !== undefined) {
+        args.push("--memory", options.memory);
+    }
+    if (options.cpus !== undefined) {
+        args.push("--cpus", options.cpus);
+    }
+    if (options.pidsLimit !== undefined) {
+        args.push("--pids-limit", options.pidsLimit);
+    }
+    if (options.testCommand !== undefined) {
+        args.push("--test-command", options.testCommand);
+    }
+    if (options.image !== undefined) {
+        args.push("--image", options.image);
+    }
+    if (options.push === false) {
+        args.push("--no-push");
+    }
+    if (options.pr === false) {
+        args.push("--no-pr");
+    }
+
+    return args;
+}
+
+function nodeInvocation(): string[] {
+    const self = fileURLToPath(import.meta.url);
+    return self.endsWith(".ts") ? ["--import", "tsx", self] : [self];
+}
+
+async function startBackgroundRun(options: RunOptions): Promise<void> {
+    const repoPath = await validateRepository(options.repo);
+    const issue = await fetchGitHubIssue(repoPath, options.issue);
+    const taskId = deriveTaskId(issue);
+    const logPath = runLogPath(repoPath, taskId);
+
+    await acquireTaskLock({ repoPath, taskId, issueId: options.issue });
+
+    await mkdir(path.dirname(logPath), { recursive: true });
+    const logHandle = await open(logPath, "a");
+
+    let child;
+
+    try {
+        child = spawn(
+            process.execPath,
+            [
+                ...nodeInvocation(),
+                ...backgroundChildArgs({ ...options, repo: repoPath }),
+            ],
+            {
+                cwd: path.dirname(fileURLToPath(import.meta.url)),
+                detached: true,
+                stdio: ["ignore", logHandle.fd, logHandle.fd],
+                env: {
+                    ...process.env,
+                    AFK_BACKGROUND_CHILD: "1",
+                    AFK_LOCK_HELD: "1",
+                    AFK_TASK_ID: taskId,
+                },
+            },
+        );
+    } catch (error) {
+        await logHandle.close();
+        await releaseTaskLock({ repoPath, taskId });
+        throw error;
+    }
+
+    const pid = child.pid;
+
+    if (pid === undefined) {
+        await logHandle.close();
+        await releaseTaskLock({ repoPath, taskId });
+        throw new Error("Unable to start the background run");
+    }
+
+    try {
+        await transferTaskLock({ repoPath, taskId, toPid: pid });
+    } catch (error) {
+        child.kill("SIGTERM");
+        await logHandle.close();
+        await releaseTaskLock({ repoPath, taskId });
+        throw error;
+    }
+
+    await logHandle.close();
+    child.unref();
+
+    await updateRunRecord({
+        repoPath,
+        taskId,
+        issueId: options.issue,
+        issueNumber: issue.number,
+        state: "running",
+        phase: "starting",
+        attempt: 0,
+        pid,
+        report: null,
+        sync: null,
+        error: null,
+    });
+
+    console.log("Started AFK run in the background.");
+    console.log("Issue:", issue.url);
+    console.log("Task ID:", taskId);
+    console.log("Branch:", `afk/${taskId}`);
+    console.log("Log:", logPath);
+    console.log(`Watch: afk logs --repo ${repoPath} --issue ${issue.number}`);
+    console.log(`Check: afk status --repo ${repoPath} --issue ${issue.number}`);
+    // shortcut: killing the coordinator leaves a detached Docker sandbox running; add a stop command that reaps it when users need it.
+    console.log(`Stop: kill ${pid}`);
+}
 
 const program = new Command();
 
@@ -153,157 +308,333 @@ program
     )
     .option("--no-push", "Skip pushing the branch to GitHub")
     .option("--no-pr", "Skip opening a pull request")
-    .action(async (options) => {
-        try {
-            if (!(await reportPreflight(options.repo))) {
-                return;
-            }
+    .option("--background", "Run in the background and return immediately")
+    .action(async (options: RunOptions) => {
+        if (options.background === true) {
+            await startBackgroundRun(options);
+            return;
+        }
 
-            const repoPath = await validateRepository(options.repo);
-            console.log("Validated repository:", repoPath);
+        await executeRun(options, process.env["AFK_BACKGROUND_CHILD"] === "1");
+    });
 
-            // 1. Fetch GitHub issue
-            const issue = await fetchGitHubIssue(repoPath, options.issue);
+async function executeRun(
+    options: RunOptions,
+    backgroundChild: boolean,
+): Promise<void> {
+    let failureRepoPath: string | null = null;
+    let failureTaskId: string | null = null;
+    let failureIssueNumber: number | null = null;
 
-            console.log("\n--- GitHub Issue ---");
-            console.log("Title:", issue.title);
-            console.log("URL:", issue.url);
+    try {
+        if (!(await reportPreflight(options.repo))) {
+            await markBackgroundFailure(
+                options,
+                "preflight",
+                "Preflight checks failed",
+            );
+            return;
+        }
 
-            // 2. Build agent prompt
-            const prompt = buildIssuePrompt(issue);
+        const repoPath = await validateRepository(options.repo);
+        failureRepoPath = repoPath;
+        console.log("Validated repository:", repoPath);
 
-            // 3. Execute task
-            const taskId = deriveTaskId(issue);
+        // 1. Fetch GitHub issue
+        const issue = await fetchGitHubIssue(repoPath, options.issue);
+        failureIssueNumber = issue.number;
+
+        console.log("\n--- GitHub Issue ---");
+        console.log("Title:", issue.title);
+        console.log("URL:", issue.url);
+
+        // 2. Build agent prompt
+        const prompt = buildIssuePrompt(issue);
+
+        // 3. Execute task
+        const taskId = backgroundChild
+            ? (process.env["AFK_TASK_ID"] ?? deriveTaskId(issue))
+            : deriveTaskId(issue);
+        failureTaskId = taskId;
+
+        if (backgroundChild) {
+            await updateRunRecord({
+                repoPath,
+                taskId,
+                issueId: options.issue,
+                issueNumber: issue.number,
+                state: "running",
+                phase: "running",
+                attempt: 0,
+                pid: process.pid,
+                report: null,
+                sync: null,
+                error: null,
+            });
+        } else {
             await acquireTaskLock({
                 repoPath,
                 taskId,
                 issueId: options.issue,
             });
+        }
 
-            const onSigint = (): void => {
-                process.off("SIGINT", onSigint);
-                process.off("SIGTERM", onSigterm);
-                void releaseTaskLock({ repoPath, taskId }).finally(() =>
-                    process.exit(130),
-                );
-            };
-            const onSigterm = (): void => {
-                process.off("SIGINT", onSigint);
-                process.off("SIGTERM", onSigterm);
-                void releaseTaskLock({ repoPath, taskId }).finally(() =>
-                    process.exit(143),
-                );
-            };
-            process.on("SIGINT", onSigint);
-            process.on("SIGTERM", onSigterm);
+        const onSigint = (): void => {
+            process.off("SIGINT", onSigint);
+            process.off("SIGTERM", onSigterm);
+            void releaseTaskLock({ repoPath, taskId }).finally(() =>
+                process.exit(130),
+            );
+        };
+        const onSigterm = (): void => {
+            process.off("SIGINT", onSigint);
+            process.off("SIGTERM", onSigterm);
+            void releaseTaskLock({ repoPath, taskId }).finally(() =>
+                process.exit(143),
+            );
+        };
+        process.on("SIGINT", onSigint);
+        process.on("SIGTERM", onSigterm);
 
-            try {
-                const result = await runTask({
+        try {
+            const result = await runTask({
+                repoPath,
+                taskId,
+                issueId: options.issue,
+                issue,
+                prompt,
+                push: options.push !== false,
+                pr: options.pr !== false,
+                ...(options.model !== undefined
+                    ? { model: options.model }
+                    : {}),
+                ...(options.timeout !== undefined
+                    ? { timeout: options.timeout }
+                    : {}),
+                ...(options.memory !== undefined
+                    ? { memory: options.memory }
+                    : {}),
+                ...(options.cpus !== undefined ? { cpus: options.cpus } : {}),
+                ...(options.pidsLimit !== undefined
+                    ? { pidsLimit: options.pidsLimit }
+                    : {}),
+                ...(options.testCommand !== undefined
+                    ? { testCommand: options.testCommand }
+                    : {}),
+                ...(options.image !== undefined
+                    ? { imageName: options.image, build: false }
+                    : {}),
+            });
+
+            // 4. Display report
+            const lastReport = result.reports.at(-1);
+
+            console.log("\n--- AFK Agent Report ---");
+            console.log("Branch:", result.branchName);
+            console.log(
+                "Worktree:",
+                result.worktreeRemoved
+                    ? "removed (branch kept)"
+                    : result.worktreePath,
+            );
+            if (result.cleanupError) {
+                console.error("Worktree cleanup failed:", result.cleanupError);
+            }
+            console.log("Attempts:", result.reports.length);
+
+            if (result.sync) {
+                console.log(
+                    "GitHub:",
+                    result.sync.pushed
+                        ? result.sync.branchUrl
+                        : `not pushed (${result.sync.pushError})`,
+                );
+                if (!result.sync.commented) {
+                    console.error(
+                        "Issue comment failed:",
+                        result.sync.commentError,
+                    );
+                }
+                if (result.sync.prUrl) {
+                    console.log("Pull request:", result.sync.prUrl);
+                }
+                if (result.sync.prError) {
+                    console.warn("Pull request warning:", result.sync.prError);
+                }
+            }
+
+            const pushFailed =
+                result.sync !== null &&
+                !result.sync.pushed &&
+                options.push !== false;
+
+            if (result.error) {
+                console.error("Execution error:", result.error);
+                process.exitCode = 1;
+            } else if (!lastReport?.success) {
+                console.log("Status: FAILED");
+                process.exitCode = 1;
+            } else if (pushFailed) {
+                console.error(
+                    "Status: FAILED (tests passed, GitHub sync failed)",
+                );
+                process.exitCode = 1;
+            } else {
+                console.log("Status: SUCCESS");
+            }
+
+            if (backgroundChild) {
+                await updateRunRecord({
                     repoPath,
                     taskId,
                     issueId: options.issue,
-                    issue,
-                    prompt,
-                    push: options.push !== false,
-                    pr: options.pr !== false,
-                    ...(options.model !== undefined
-                        ? { model: options.model }
-                        : {}),
-                    ...(options.timeout !== undefined
-                        ? { timeout: options.timeout }
-                        : {}),
-                    ...(options.memory !== undefined
-                        ? { memory: options.memory }
-                        : {}),
-                    ...(options.cpus !== undefined
-                        ? { cpus: options.cpus }
-                        : {}),
-                    ...(options.pidsLimit !== undefined
-                        ? { pidsLimit: options.pidsLimit }
-                        : {}),
-                    ...(options.testCommand !== undefined
-                        ? { testCommand: options.testCommand }
-                        : {}),
-                    ...(options.image !== undefined
-                        ? { imageName: options.image, build: false }
-                        : {}),
+                    issueNumber: issue.number,
+                    state:
+                        result.error !== null ||
+                        !lastReport?.success ||
+                        pushFailed
+                            ? "failed"
+                            : "succeeded",
+                    phase: "finished",
+                    attempt: result.reports.length,
+                    pid: process.pid,
+                    report: lastReport ?? null,
+                    sync: result.sync,
+                    error: result.error,
+                    finishedAt: new Date().toISOString(),
                 });
-
-                // 4. Display report
-                const lastReport = result.reports.at(-1);
-
-                console.log("\n--- AFK Agent Report ---");
-                console.log("Branch:", result.branchName);
-                console.log(
-                    "Worktree:",
-                    result.worktreeRemoved
-                        ? "removed (branch kept)"
-                        : result.worktreePath,
-                );
-                if (result.cleanupError) {
-                    console.error(
-                        "Worktree cleanup failed:",
-                        result.cleanupError,
-                    );
-                }
-                console.log("Attempts:", result.reports.length);
-
-                if (result.sync) {
-                    console.log(
-                        "GitHub:",
-                        result.sync.pushed
-                            ? result.sync.branchUrl
-                            : `not pushed (${result.sync.pushError})`,
-                    );
-                    if (!result.sync.commented) {
-                        console.error(
-                            "Issue comment failed:",
-                            result.sync.commentError,
-                        );
-                    }
-                    if (result.sync.prUrl) {
-                        console.log("Pull request:", result.sync.prUrl);
-                    }
-                    if (result.sync.prError) {
-                        console.warn(
-                            "Pull request warning:",
-                            result.sync.prError,
-                        );
-                    }
-                }
-
-                const pushFailed =
-                    result.sync !== null &&
-                    !result.sync.pushed &&
-                    options.push !== false;
-
-                if (result.error) {
-                    console.error("Execution error:", result.error);
-                    process.exitCode = 1;
-                } else if (!lastReport?.success) {
-                    console.log("Status: FAILED");
-                    process.exitCode = 1;
-                } else if (pushFailed) {
-                    console.error(
-                        "Status: FAILED (tests passed, GitHub sync failed)",
-                    );
-                    process.exitCode = 1;
-                } else {
-                    console.log("Status: SUCCESS");
-                }
-
-                if (lastReport) {
-                    console.log("Changed files:", lastReport.changedFiles);
-                    console.log("Reasons:", lastReport.reasons);
-                }
-            } finally {
-                process.off("SIGINT", onSigint);
-                process.off("SIGTERM", onSigterm);
-                await releaseTaskLock({ repoPath, taskId });
             }
+
+            if (lastReport) {
+                console.log("Changed files:", lastReport.changedFiles);
+                console.log("Reasons:", lastReport.reasons);
+            }
+        } finally {
+            process.off("SIGINT", onSigint);
+            process.off("SIGTERM", onSigterm);
+            await releaseTaskLock({ repoPath, taskId });
+        }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (
+            backgroundChild &&
+            failureRepoPath !== null &&
+            failureTaskId !== null
+        ) {
+            await updateRunRecord({
+                repoPath: failureRepoPath,
+                taskId: failureTaskId,
+                issueId: options.issue,
+                issueNumber: failureIssueNumber ?? 0,
+                state: "failed",
+                phase: "failed",
+                attempt: 0,
+                pid: process.pid,
+                report: null,
+                sync: null,
+                error: message,
+                finishedAt: new Date().toISOString(),
+            }).catch(() => undefined);
+        }
+
+        console.error("AFK Agent failed:", message);
+        process.exitCode = 1;
+    } finally {
+        const taskId = process.env["AFK_TASK_ID"];
+
+        if (backgroundChild && taskId !== undefined) {
+            await releaseTaskLock({
+                repoPath: path.resolve(options.repo),
+                taskId,
+            });
+        }
+    }
+}
+
+type StatusOptions = {
+    repo: string;
+    issue?: string;
+};
+
+async function markBackgroundFailure(
+    options: RunOptions,
+    phase: string,
+    message: string,
+): Promise<void> {
+    const taskId = process.env["AFK_TASK_ID"];
+
+    if (process.env["AFK_BACKGROUND_CHILD"] !== "1" || taskId === undefined) {
+        return;
+    }
+
+    await updateRunRecord({
+        repoPath: path.resolve(options.repo),
+        taskId,
+        issueId: options.issue,
+        issueNumber: parseIssueNumber(options.issue),
+        state: "failed",
+        phase,
+        attempt: 0,
+        pid: process.pid,
+        report: null,
+        sync: null,
+        error: message,
+        finishedAt: new Date().toISOString(),
+    }).catch(() => undefined);
+}
+
+async function tailRunLog(
+    logPath: string,
+    signal: AbortSignal,
+    shouldContinue: () => Promise<boolean>,
+): Promise<void> {
+    let offset = 0;
+
+    for (;;) {
+        // shortcut: re-reads the whole log each poll; switch to a byte-range read if logs get large.
+        const content = await readFile(logPath, "utf8").catch(() => "");
+
+        if (content.length > offset) {
+            process.stdout.write(content.slice(offset));
+            offset = content.length;
+        }
+
+        if (signal.aborted || !(await shouldContinue())) {
+            return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+}
+
+program
+    .command("status")
+    .description("Show background run status")
+    .requiredOption("--repo <path>", "Repository path")
+    .option("--issue <number-or-url>", "GitHub issue number or URL")
+    .action(async (options: StatusOptions) => {
+        try {
+            const repoPath = await validateRepository(options.repo);
+
+            if (options.issue !== undefined) {
+                const issueNumber = parseIssueNumber(options.issue);
+                const record = await findRunForIssue(repoPath, issueNumber);
+
+                if (record === null) {
+                    console.error(`No runs found for issue ${issueNumber}.`);
+                    process.exitCode = 1;
+                    return;
+                }
+
+                console.log(formatRunDetail(record));
+                return;
+            }
+
+            console.log(formatRunList(await listRunRecords(repoPath)));
         } catch (error) {
             console.error(
-                "AFK Agent failed:",
+                "Unable to read run status:",
                 error instanceof Error ? error.message : error,
             );
             process.exitCode = 1;
@@ -325,11 +656,42 @@ program
         try {
             const issueNumber = parseIssueNumber(options.issue);
             const repoPath = await validateRepository(options.repo);
+            const record = await findRunForIssue(repoPath, issueNumber);
 
-            await watchSandboxLogs({
-                repoPath,
-                issueNumber,
-                signal: controller.signal,
+            if (record === null) {
+                await watchSandboxLogs({
+                    repoPath,
+                    issueNumber,
+                    signal: controller.signal,
+                });
+                return;
+            }
+
+            if (resolveRunState(record) === "running") {
+                try {
+                    await watchSandboxLogs({
+                        repoPath,
+                        issueNumber,
+                        signal: controller.signal,
+                    });
+                } catch (error) {
+                    if (controller.signal.aborted) {
+                        return;
+                    }
+
+                    const message =
+                        error instanceof Error ? error.message : String(error);
+
+                    if (!message.includes("No running agent")) {
+                        throw error;
+                    }
+                }
+            }
+
+            await tailRunLog(record.logPath, controller.signal, async () => {
+                const latest = await findRunForIssue(repoPath, issueNumber);
+
+                return latest !== null && resolveRunState(latest) === "running";
             });
         } catch (error) {
             if (!controller.signal.aborted) {

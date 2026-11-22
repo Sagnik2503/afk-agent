@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type TaskLock = {
@@ -13,7 +13,7 @@ function lockPath(repoPath: string, taskId: string): string {
     return path.join(repoPath, ".afk", "locks", `${taskId}.lock`);
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
     if (!Number.isSafeInteger(pid) || pid <= 0) {
         return false;
     }
@@ -87,6 +87,26 @@ export async function acquireTaskLock(input: {
     }
 
     throw new Error(`Unable to acquire lock for task ${input.taskId}`);
+}
+
+// Hand a lock this process holds to a detached child, so the child owns it.
+export async function transferTaskLock(input: {
+    repoPath: string;
+    taskId: string;
+    toPid: number;
+}): Promise<void> {
+    const existing = await readTaskLock(input.repoPath, input.taskId);
+
+    if (existing?.pid !== process.pid) {
+        throw new Error(
+            `Task ${input.taskId} lock is not held by this process`,
+        );
+    }
+
+    await writeFile(
+        lockPath(input.repoPath, input.taskId),
+        JSON.stringify({ ...existing, pid: input.toPid } satisfies TaskLock),
+    );
 }
 
 export async function releaseTaskLock(input: {
