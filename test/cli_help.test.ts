@@ -69,3 +69,20 @@ describe("afk command overview", () => {
         expect(stdout.trim()).toBe(packageVersion());
     });
 });
+
+describe("afk run startup", () => {
+    it("shows the banner with product name, version, and purpose", async () => {
+        const { code, stdout } = await runCli([
+            "run",
+            "--repo",
+            "/nonexistent-afk-banner-check",
+            "--issue",
+            "5",
+        ]);
+
+        expect(code).not.toBe(0);
+        expect(stdout).toContain("afk-agent");
+        expect(stdout).toContain(packageVersion());
+        expect(stdout).toContain("A safe, bounded AFK coding agent");
+    }, 20_000);
+});

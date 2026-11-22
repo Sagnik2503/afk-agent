@@ -1,13 +1,19 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
-import { noRunningAgentMessage } from "../agent/docker_runner.js";
+import {
+    noRunningAgentMessage,
+    sandboxContainerName,
+} from "../agent/docker_runner.js";
 import { ChildProcess } from "../process.js";
-import { commitLeftovers, type SyncRun } from "../github/sync.js";
-import { removeWorktree } from "../worktree/manager.js";
+import type { SyncRun } from "../github/sync.js";
+import { taskWorktreePath } from "../worktree/manager.js";
+import { errorMessage } from "../errors.js";
+import { disposeWorktree } from "./dispose.js";
 import { isProcessAlive, releaseTaskLock } from "./lock.js";
 import {
     findRunForIssue,
     readRunRecord,
+    resolveRunState,
     saveRunRecord,
     type RunRecord,
 } from "./run_record.js";
@@ -73,21 +79,12 @@ async function terminateProcess(pid: number | null): Promise<void> {
     await waitUntilDead(pid, KILL_GRACE_MS);
 }
 
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
-async function disposeWorktree(input: {
+async function disposeStoppedWorktree(input: {
     repoPath: string;
     taskId: string;
     attempt: number;
 }): Promise<string | null> {
-    const worktreePath = path.join(
-        input.repoPath,
-        ".afk",
-        "worktrees",
-        input.taskId,
-    );
+    const worktreePath = taskWorktreePath(input.repoPath, input.taskId);
     const exists = await stat(worktreePath)
         .then(() => true)
         .catch(() => false);
@@ -96,26 +93,15 @@ async function disposeWorktree(input: {
         return null;
     }
 
-    let commitError: string | null = null;
-
-    try {
-        await commitLeftovers({
-            worktreePath,
-            taskId: input.taskId,
-            attempt: input.attempt,
-        });
-    } catch (error) {
-        commitError = errorMessage(error);
-    }
-
-    try {
-        await removeWorktree(input.repoPath, worktreePath, { force: true });
-    } catch (error) {
-        const removalError = errorMessage(error);
-        return commitError ? `${commitError}; ${removalError}` : removalError;
-    }
-
-    return commitError;
+    // Cancellation skips GitHub sync (ADR-0001 amendment): commit leftovers
+    // locally and keep the branch, but do not push or comment.
+    const { error } = await disposeWorktree({
+        repoPath: input.repoPath,
+        worktreePath,
+        taskId: input.taskId,
+        attempt: input.attempt,
+    });
+    return error;
 }
 
 export async function stopRun(
@@ -126,9 +112,17 @@ export async function stopRun(
     const repoPath = path.resolve(input.repoPath);
     const record = await findRunForIssue(repoPath, input.issueNumber);
 
-    if (record === null || record.state !== "running") {
+    if (record === null) {
         throw new Error(noRunningAgentMessage(repoPath, input.issueNumber));
     }
+
+    const state = resolveRunState(record);
+
+    if (state !== "running" && state !== "stale") {
+        throw new Error(noRunningAgentMessage(repoPath, input.issueNumber));
+    }
+
+    const stale = state === "stale";
 
     await terminateProcess(record.pid);
 
@@ -137,7 +131,7 @@ export async function stopRun(
     try {
         const removal = await run(
             "docker",
-            ["rm", "-f", `afk-${record.taskId}`],
+            ["rm", "-f", sandboxContainerName(record.taskId)],
             {
                 timeout: SANDBOX_CLEANUP_TIMEOUT_MS,
             },
@@ -153,10 +147,10 @@ export async function stopRun(
         sandboxError = `Sandbox removal failed: ${errorMessage(error)}`;
     }
 
-    const worktreeError = await disposeWorktree({
+    const worktreeError = await disposeStoppedWorktree({
         repoPath,
         taskId: record.taskId,
-        attempt: record.attempt,
+        attempt: record.attempts,
     });
     const cleanupError =
         [sandboxError, worktreeError]
@@ -174,9 +168,18 @@ export async function stopRun(
         pid: null,
         updatedAt: now,
         finishedAt: now,
-        error: "Stopped by user via afk stop.",
+        error: stale
+            ? "Stale run cleaned up by afk stop."
+            : "Stopped by user via afk stop.",
     };
     await saveRunRecord(stopped);
+
+    if (stale) {
+        if (cleanupError !== null) {
+            console.error("Cleanup warning:", cleanupError);
+        }
+        throw new Error(noRunningAgentMessage(repoPath, input.issueNumber));
+    }
 
     return { record: stopped, cleanupError };
 }

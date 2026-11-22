@@ -1,4 +1,13 @@
-import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import {
+    link,
+    mkdir,
+    open,
+    readFile,
+    rename,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 export type TaskLock = {
@@ -26,16 +35,20 @@ export function isProcessAlive(pid: number): boolean {
     }
 }
 
-export async function readTaskLock(
-    repoPath: string,
-    taskId: string,
-): Promise<TaskLock | null> {
+async function readLockFile(file: string): Promise<TaskLock | null> {
     try {
-        const content = await readFile(lockPath(repoPath, taskId), "utf8");
+        const content = await readFile(file, "utf8");
         return JSON.parse(content) as TaskLock;
     } catch {
         return null;
     }
+}
+
+export async function readTaskLock(
+    repoPath: string,
+    taskId: string,
+): Promise<TaskLock | null> {
+    return readLockFile(lockPath(repoPath, taskId));
 }
 
 export async function acquireTaskLock(input: {
@@ -82,7 +95,30 @@ export async function acquireTaskLock(input: {
                 );
             }
 
-            await unlink(file).catch(() => undefined);
+            // Claim the stale lock by renaming it: only one racer can win the
+            // rename, so a live lock created meanwhile is never unlinked.
+            const claim = `${file}.stale-${randomUUID()}`;
+            try {
+                await rename(file, claim);
+            } catch {
+                continue;
+            }
+
+            const claimed = await readLockFile(claim);
+
+            if (claimed !== null && isProcessAlive(claimed.pid)) {
+                // A live lock appeared after our read; put it back and retry.
+                const restored = await link(claim, file)
+                    .then(() => true)
+                    .catch(() => false);
+                if (restored) {
+                    await unlink(claim).catch(() => undefined);
+                }
+                // shortcut: if the path was refilled meanwhile the claim file is orphaned; rare ABA residual.
+                continue;
+            }
+
+            await unlink(claim).catch(() => undefined);
         }
     }
 

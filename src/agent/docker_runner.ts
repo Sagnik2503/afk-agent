@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { packageVersion } from "../package_info.js";
+import { taskWorktreePath } from "../worktree/manager.js";
 import {
     ChildProcess,
     type ProcessResult,
@@ -117,6 +118,10 @@ export function noRunningAgentMessage(
     return `No running agent for issue ${issueNumber} in ${repoPath}.`;
 }
 
+export function sandboxContainerName(taskId: string): string {
+    return `afk-${taskId}`;
+}
+
 function finishedMessage(repoPath: string, issueNumber: number): string {
     return `Agent for issue ${issueNumber} in ${repoPath} has finished.`;
 }
@@ -201,7 +206,8 @@ async function detectResourceLimit(
 ): Promise<ResourceLimit | null> {
     const state = await inspectContainerState(containerName);
 
-    if (state?.OOMKilled === true || result.exitCode === 137) {
+    // Exit 137 alone is not OOM evidence: timeout SIGKILL and afk stop also produce it.
+    if (state?.OOMKilled === true) {
         return {
             kind: "memory",
             value: limits.memory,
@@ -384,12 +390,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
 
     const repoPath = path.resolve(options.repoPath);
 
-    const worktreePath = path.resolve(
-        repoPath,
-        ".afk",
-        "worktrees",
-        options.taskId,
-    );
+    const worktreePath = taskWorktreePath(repoPath, options.taskId);
 
     const gitDir = path.resolve(repoPath, ".git");
     const model = options.model ?? DEFAULT_MODEL;
@@ -402,7 +403,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     const memory = parseMemoryLimit(options.memory ?? DEFAULT_MEMORY);
     const cpus = parseCpusLimit(options.cpus ?? DEFAULT_CPUS);
     const pidsLimit = parsePidsLimit(options.pidsLimit ?? DEFAULT_PIDS_LIMIT);
-    const containerName = `afk-${options.taskId}`;
+    const containerName = sandboxContainerName(options.taskId);
     const env = options.env ?? process.env;
     const providerEnv = PROVIDER_KEY_ENV.filter(
         (key) => env[key] !== undefined,

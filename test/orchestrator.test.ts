@@ -206,10 +206,40 @@ describe("runTask", () => {
 
         await runTask({
             ...input,
-            onPhase: (phase) => phases.push(phase),
+            onPhase: (phase) => {
+                phases.push(phase);
+            },
         });
 
         expect(phases).toEqual(["image", "sandbox"]);
+    });
+
+    it("awaits async phase callbacks before continuing", async () => {
+        const events: string[] = [];
+        agent.prepareImage.mockImplementation(async () => {
+            events.push("prepare");
+        });
+
+        await runTask({
+            ...input,
+            onPhase: async (phase) => {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                events.push(phase);
+            },
+        });
+
+        expect(events).toEqual(["image", "prepare", "sandbox"]);
+    });
+
+    it("passes the attempt callback through to retries", async () => {
+        const onAttempt = vi.fn();
+
+        await runTask({ ...input, onAttempt });
+
+        expect(mockedRunWithRetries).toHaveBeenCalledWith(
+            expect.objectContaining({ onAttempt }),
+            expect.anything(),
+        );
     });
 
     it("passes the resolved repo path to the agent and worktree manager", async () => {

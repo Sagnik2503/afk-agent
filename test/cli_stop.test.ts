@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { execPath } from "node:process";
 import {
+    access,
     mkdir,
     mkdtemp,
     readFile,
@@ -85,7 +86,7 @@ function record(
         branchName: "afk/issue-5-demo",
         state: "running",
         phase: "running",
-        attempt: 1,
+        attempts: 1,
         pid: 2_000_000_000,
         startedAt: now,
         updatedAt: now,
@@ -180,6 +181,31 @@ describe("afk stop", () => {
         await expect(readRunRecord(repoPath, finished.taskId)).resolves.toEqual(
             finished,
         );
+    });
+
+    it("reports no running agent for a stale run but cleans up its artifacts", async () => {
+        const repoPath = await makeRepo();
+        const { worktreePath } = await setupWorktree(repoPath, "issue-5-demo");
+        const stale = record(repoPath);
+        await saveRunRecord(stale);
+        await writeLock(repoPath, stale.taskId, 2_000_000_000);
+
+        const { code, stderr } = await runCli([
+            "stop",
+            "--repo",
+            repoPath,
+            "--issue",
+            "5",
+        ]);
+
+        expect(code).not.toBe(0);
+        expect(stderr).toContain(
+            `No running agent for issue 5 in ${repoPath}.`,
+        );
+        const stopped = await readRunRecord(repoPath, stale.taskId);
+        expect(stopped?.state).toBe("stopped");
+        await expect(readTaskLock(repoPath, stale.taskId)).resolves.toBeNull();
+        await expect(access(worktreePath)).rejects.toThrow();
     });
 
     it("stops a running agent given an issue URL, then status and logs reflect it", async () => {

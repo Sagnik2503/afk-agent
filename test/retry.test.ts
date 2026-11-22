@@ -102,6 +102,24 @@ describe("runWithRetries", () => {
         expect(deps.getChangedFiles).toHaveBeenCalledTimes(1);
     });
 
+    it("announces each attempt as it starts", async () => {
+        const deps = makeDeps();
+        deps.runTests.mockResolvedValue(testResult({ passed: false }));
+        const seen: number[] = [];
+
+        await runWithRetries(
+            {
+                ...input,
+                onAttempt: (attempt) => {
+                    seen.push(attempt);
+                },
+            },
+            deps,
+        );
+
+        expect(seen).toEqual([1, 2, 3]);
+    });
+
     it("stops after a resource limit kill without retrying", async () => {
         const deps = makeDeps();
         deps.runAgent.mockResolvedValue(
