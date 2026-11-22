@@ -11,6 +11,7 @@ It runs typecheck, lint, format check, and tests, in that order.
 - Run `npx prettier --write` on the files you changed to fix formatting.
 - After implementing a GitHub issue, always add implementation notes as a
   comment on the issue (`gh issue comment`) and close it (`gh issue close`).
+- After you are done implementing a spec or standalone ticket, always raise a PR using the 'pr' skill.
 
 Grilling Rules
 
