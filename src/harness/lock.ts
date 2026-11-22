@@ -112,13 +112,14 @@ export async function transferTaskLock(input: {
 export async function releaseTaskLock(input: {
     repoPath: string;
     taskId: string;
+    force?: boolean;
 }): Promise<void> {
     if (!/^[a-zA-Z0-9_-]+$/.test(input.taskId)) {
         return;
     }
 
     const existing = await readTaskLock(input.repoPath, input.taskId);
-    if (existing?.pid !== process.pid) {
+    if (input.force !== true && existing?.pid !== process.pid) {
         return;
     }
 
