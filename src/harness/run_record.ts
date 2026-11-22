@@ -4,7 +4,7 @@ import type { HarnessReport } from "./report.js";
 import type { SyncInfo } from "./orchestrator.js";
 import { isProcessAlive } from "./lock.js";
 
-export type RunState = "running" | "succeeded" | "failed";
+export type RunState = "running" | "succeeded" | "failed" | "stopped";
 export type RunDisplayState = RunState | "stale";
 
 export type RunRecord = {

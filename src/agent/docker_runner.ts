@@ -110,7 +110,10 @@ type ContainerInspection = {
     mounts: string[];
 };
 
-function noRunningAgentMessage(repoPath: string, issueNumber: number): string {
+export function noRunningAgentMessage(
+    repoPath: string,
+    issueNumber: number,
+): string {
     return `No running agent for issue ${issueNumber} in ${repoPath}.`;
 }
 

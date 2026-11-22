@@ -41,6 +41,7 @@ import {
     runLogPath,
     updateRunRecord,
 } from "./harness/run_record.js";
+import { stopRun } from "./harness/stop.js";
 
 function parseTimeout(value: string): number {
     const timeout = Number(value);
@@ -87,6 +88,7 @@ const commandExamples: Record<string, string> = {
     run: "afk run --repo . --issue 142",
     logs: "afk logs --repo . --issue 142",
     status: "afk status --repo .",
+    stop: "afk stop --repo . --issue 142",
 };
 
 type RunOptions = {
@@ -222,8 +224,7 @@ async function startBackgroundRun(options: RunOptions): Promise<void> {
     console.log("Log:", logPath);
     console.log(`Watch: afk logs --repo ${repoPath} --issue ${issue.number}`);
     console.log(`Check: afk status --repo ${repoPath} --issue ${issue.number}`);
-    // shortcut: killing the coordinator leaves a detached Docker sandbox running; add a stop command that reaps it when users need it.
-    console.log(`Stop: kill ${pid}`);
+    console.log(`Stop: afk stop --repo ${repoPath} --issue ${issue.number}`);
 }
 
 const program = new Command();
@@ -674,6 +675,37 @@ program
         } finally {
             process.off("SIGINT", onSignal);
             process.off("SIGTERM", onSignal);
+        }
+    });
+
+type StopOptions = {
+    repo: string;
+    issue: string;
+};
+
+program
+    .command("stop")
+    .description("Stop a running background AFK agent")
+    .requiredOption("--repo <path>", "Repository path")
+    .requiredOption("--issue <number-or-url>", "GitHub issue number or URL")
+    .action(async (options: StopOptions) => {
+        try {
+            const repoPath = await validateRepository(options.repo);
+            const issueNumber = parseIssueNumber(options.issue);
+            const result = await stopRun({ repoPath, issueNumber });
+
+            console.log("Stopped AFK run.");
+            console.log("Task ID:", result.record.taskId);
+            console.log("Branch kept:", result.record.branchName);
+
+            if (result.cleanupError !== null) {
+                console.error("Cleanup warning:", result.cleanupError);
+            }
+        } catch (error) {
+            console.error(
+                error instanceof Error ? error.message : String(error),
+            );
+            process.exitCode = 1;
         }
     });
 
