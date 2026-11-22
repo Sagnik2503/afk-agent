@@ -4,8 +4,14 @@ import type { ProcessResult } from "../src/process.js";
 import { ChildProcess } from "../src/process.js";
 import {
     createDockerAgent,
+    DEFAULT_CPUS,
     DEFAULT_DOCKERFILE,
     DEFAULT_IMAGE,
+    DEFAULT_MEMORY,
+    DEFAULT_PIDS_LIMIT,
+    parseCpusLimit,
+    parseMemoryLimit,
+    parsePidsLimit,
     watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
 import { packageVersion } from "../src/package_info.js";
@@ -56,6 +62,34 @@ describe("createDockerAgent", () => {
             createDockerAgent({ ...options, issueId: "issue\n" }),
         ).toThrow("Invalid issue ID");
         expect(mockedChildProcess).not.toHaveBeenCalled();
+    });
+
+    it("parses valid resource limits and rejects invalid ones", () => {
+        expect(parseMemoryLimit("2g")).toBe("2g");
+        expect(parseMemoryLimit("1.5G")).toBe("1.5G");
+        expect(parseMemoryLimit("512m")).toBe("512m");
+        expect(parseCpusLimit("0.5")).toBe("0.5");
+        expect(parseCpusLimit("4")).toBe("4");
+        expect(parsePidsLimit("512")).toBe("512");
+
+        expect(() => parseMemoryLimit("0")).toThrow(
+            "Memory must be a positive number",
+        );
+        expect(() => parseMemoryLimit("2gb")).toThrow(
+            "Memory must be a positive number",
+        );
+        expect(() => parseCpusLimit("-1")).toThrow(
+            "CPUs must be a positive number",
+        );
+        expect(() => parseCpusLimit("abc")).toThrow(
+            "CPUs must be a positive number",
+        );
+        expect(() => parsePidsLimit("0")).toThrow(
+            "PIDs limit must be a positive integer",
+        );
+        expect(() => parsePidsLimit("10.5")).toThrow(
+            "PIDs limit must be a positive integer",
+        );
     });
 
     it("skips the build when the image already exists", async () => {
@@ -222,6 +256,12 @@ describe("createDockerAgent", () => {
                 "run",
                 "--name",
                 "afk-task-1",
+                "--memory",
+                DEFAULT_MEMORY,
+                "--cpus",
+                DEFAULT_CPUS,
+                "--pids-limit",
+                DEFAULT_PIDS_LIMIT,
                 "--user",
                 "node",
                 "-w",
@@ -259,6 +299,156 @@ describe("createDockerAgent", () => {
             ],
             { timeout: 600_000, env: {} },
         );
+    });
+
+    it("applies the default memory, CPU, and PID ceilings", async () => {
+        const agent = createDockerAgent({ ...options, env: {} });
+
+        await agent.run("Fix it");
+
+        const runArgs = mockedChildProcess.mock.calls[1]?.[1] ?? [];
+        const nameIndex = runArgs.indexOf("--name");
+        const [nameFlag, nameValue] = runArgs.slice(nameIndex, nameIndex + 2);
+
+        expect(nameFlag).toBe("--name");
+        expect(nameValue).toBe("afk-task-1");
+        expect(runArgs.slice(nameIndex + 2, nameIndex + 8)).toEqual([
+            "--memory",
+            "2g",
+            "--cpus",
+            "2",
+            "--pids-limit",
+            "512",
+        ]);
+    });
+
+    it("uses resource limit overrides for a single run", async () => {
+        const agent = createDockerAgent({
+            ...options,
+            memory: "4g",
+            cpus: "0.5",
+            pidsLimit: "1024",
+            env: {},
+        });
+
+        await agent.run("Fix it");
+
+        const runArgs = mockedChildProcess.mock.calls[1]?.[1] ?? [];
+
+        expect(runArgs).toContain("--memory");
+        expect(runArgs[runArgs.indexOf("--memory") + 1]).toBe("4g");
+        expect(runArgs[runArgs.indexOf("--cpus") + 1]).toBe("0.5");
+        expect(runArgs[runArgs.indexOf("--pids-limit") + 1]).toBe("1024");
+    });
+
+    it("rejects invalid resource limits before running Docker", () => {
+        expect(() =>
+            createDockerAgent({ ...options, memory: "two gigs" }),
+        ).toThrow("Memory must be a positive number");
+        expect(() => createDockerAgent({ ...options, cpus: "0" })).toThrow(
+            "CPUs must be a positive number",
+        );
+        expect(() =>
+            createDockerAgent({ ...options, pidsLimit: "1.5" }),
+        ).toThrow("PIDs limit must be a positive integer");
+        expect(mockedChildProcess).not.toHaveBeenCalled();
+    });
+
+    it("reports a memory limit kill when Docker reports OOMKilled", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(result({ exitCode: 137 }))
+            .mockResolvedValueOnce(
+                result({
+                    stdout: JSON.stringify({ OOMKilled: true, ExitCode: 137 }),
+                }),
+            )
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const runResult = await agent.run("Fix it");
+
+        expect(runResult.resourceLimit).toEqual({
+            kind: "memory",
+            value: "2g",
+            message:
+                "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+        });
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(3, "docker", [
+            "inspect",
+            "--format",
+            "{{json .State}}",
+            "afk-task-1",
+        ]);
+    });
+
+    it("does not blame the memory limit for exit 137 without OOM evidence", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(result({ exitCode: 137 }))
+            .mockResolvedValueOnce(result({ stdout: "{}" }))
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const runResult = await agent.run("Fix it");
+
+        expect(runResult.resourceLimit).toBeUndefined();
+        expect(runResult.exitCode).toBe(137);
+    });
+
+    it("does not blame the memory limit for a timed-out run killed with SIGKILL", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(
+                result({ exitCode: 137, timedOut: true, signal: "SIGKILL" }),
+            )
+            .mockResolvedValueOnce(result({ stdout: "{}" }))
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const runResult = await agent.run("Fix it");
+
+        expect(runResult.resourceLimit).toBeUndefined();
+        expect(runResult.timedOut).toBe(true);
+    });
+
+    it("inspects the container before removing it after a limit kill", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(result({ exitCode: 137 }))
+            .mockResolvedValueOnce(result({ stdout: "{}" }))
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        await agent.run("Fix it");
+
+        const inspectOrder = mockedChildProcess.mock.invocationCallOrder[2]!;
+        const cleanupOrder = mockedChildProcess.mock.invocationCallOrder[3]!;
+
+        expect(inspectOrder).toBeLessThan(cleanupOrder);
+    });
+
+    it("reports a PID limit kill from the process exhaustion stderr", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(
+                result({
+                    exitCode: 1,
+                    stderr: "fork: retry: Resource temporarily unavailable",
+                }),
+            )
+            .mockResolvedValueOnce(result({ stdout: "{}" }))
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const runResult = await agent.run("Fix it");
+
+        expect(runResult.resourceLimit).toEqual({
+            kind: "pids",
+            value: "512",
+            message:
+                "sandbox exceeded its process limit (512); raise --pids-limit to allow more",
+        });
     });
 
     it("uses the override model, image, Dockerfile, and timeout", async () => {

@@ -1,7 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { packageVersion } from "../package_info.js";
-import { ChildProcess, type ProcessResult } from "../process.js";
+import { taskWorktreePath } from "../worktree/manager.js";
+import {
+    ChildProcess,
+    type ProcessResult,
+    type ResourceLimit,
+} from "../process.js";
 
 export const DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free";
 export const DEFAULT_IMAGE = `afk-agent:${packageVersion()}`;
@@ -9,6 +14,50 @@ export const DEFAULT_DOCKERFILE = fileURLToPath(
     new URL("../../Dockerfile", import.meta.url),
 );
 export const DEFAULT_TIMEOUT = 10 * 60 * 1000;
+export const DEFAULT_MEMORY = "2g";
+export const DEFAULT_CPUS = "2";
+export const DEFAULT_PIDS_LIMIT = "512";
+
+const MEMORY_PATTERN = /^\d+(\.\d+)?[bkmg]?$/i;
+const CPUS_PATTERN = /^\d+(\.\d+)?$/;
+const PIDS_PATTERN = /^[1-9]\d*$/;
+const PIDS_STDERR_PATTERN =
+    /pids|fork:|resource temporarily unavailable|can't create new thread|pthread_create/i;
+
+export function parseMemoryLimit(value: string): string {
+    const normalized = value.trim();
+
+    if (
+        !MEMORY_PATTERN.test(normalized) ||
+        !(Number.parseFloat(normalized) > 0)
+    ) {
+        throw new Error(
+            "Memory must be a positive number with an optional b, k, m, or g unit.",
+        );
+    }
+
+    return normalized;
+}
+
+export function parseCpusLimit(value: string): string {
+    const normalized = value.trim();
+
+    if (!CPUS_PATTERN.test(normalized) || !(Number(normalized) > 0)) {
+        throw new Error("CPUs must be a positive number.");
+    }
+
+    return normalized;
+}
+
+export function parsePidsLimit(value: string): string {
+    const normalized = value.trim();
+
+    if (!PIDS_PATTERN.test(normalized)) {
+        throw new Error("PIDs limit must be a positive integer.");
+    }
+
+    return normalized;
+}
 const CLEANUP_TIMEOUT = 10_000;
 const PROVIDER_KEY_ENV = [
     "ANTHROPIC_API_KEY",
@@ -39,6 +88,9 @@ export type DockerAgentOptions = PrepareImageOptions & {
     taskId: string;
     issueId: string;
     model?: string;
+    memory?: string;
+    cpus?: string;
+    pidsLimit?: string;
     build?: boolean;
     env?: NodeJS.ProcessEnv;
 };
@@ -59,8 +111,15 @@ type ContainerInspection = {
     mounts: string[];
 };
 
-function noRunningAgentMessage(repoPath: string, issueNumber: number): string {
+export function noRunningAgentMessage(
+    repoPath: string,
+    issueNumber: number,
+): string {
     return `No running agent for issue ${issueNumber} in ${repoPath}.`;
+}
+
+export function sandboxContainerName(taskId: string): string {
+    return `afk-${taskId}`;
 }
 
 function finishedMessage(repoPath: string, issueNumber: number): string {
@@ -112,6 +171,59 @@ async function inspectContainer(
         running: details.State?.Running === true,
         mounts,
     };
+}
+
+type ContainerState = {
+    OOMKilled?: boolean;
+    ExitCode?: number;
+};
+
+async function inspectContainerState(
+    containerName: string,
+): Promise<ContainerState | null> {
+    const result = await ChildProcess("docker", [
+        "inspect",
+        "--format",
+        "{{json .State}}",
+        containerName,
+    ]);
+
+    if (result.exitCode !== 0) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(result.stdout) as ContainerState;
+    } catch {
+        return null;
+    }
+}
+
+async function detectResourceLimit(
+    containerName: string,
+    result: ProcessResult,
+    limits: { memory: string; pidsLimit: string },
+): Promise<ResourceLimit | null> {
+    const state = await inspectContainerState(containerName);
+
+    // Exit 137 alone is not OOM evidence: timeout SIGKILL and afk stop also produce it.
+    if (state?.OOMKilled === true) {
+        return {
+            kind: "memory",
+            value: limits.memory,
+            message: `sandbox exceeded its memory limit (${limits.memory}); raise --memory to allow more`,
+        };
+    }
+
+    if (PIDS_STDERR_PATTERN.test(result.stderr)) {
+        return {
+            kind: "pids",
+            value: limits.pidsLimit,
+            message: `sandbox exceeded its process limit (${limits.pidsLimit}); raise --pids-limit to allow more`,
+        };
+    }
+
+    return null;
 }
 
 async function followContainerLogs(
@@ -278,12 +390,7 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
 
     const repoPath = path.resolve(options.repoPath);
 
-    const worktreePath = path.resolve(
-        repoPath,
-        ".afk",
-        "worktrees",
-        options.taskId,
-    );
+    const worktreePath = taskWorktreePath(repoPath, options.taskId);
 
     const gitDir = path.resolve(repoPath, ".git");
     const model = options.model ?? DEFAULT_MODEL;
@@ -293,7 +400,10 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
     const dockerfilePath = options.dockerfilePath ?? DEFAULT_DOCKERFILE;
 
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
-    const containerName = `afk-${options.taskId}`;
+    const memory = parseMemoryLimit(options.memory ?? DEFAULT_MEMORY);
+    const cpus = parseCpusLimit(options.cpus ?? DEFAULT_CPUS);
+    const pidsLimit = parsePidsLimit(options.pidsLimit ?? DEFAULT_PIDS_LIMIT);
+    const containerName = sandboxContainerName(options.taskId);
     const env = options.env ?? process.env;
     const providerEnv = PROVIDER_KEY_ENV.filter(
         (key) => env[key] !== undefined,
@@ -332,12 +442,18 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
         let cleanupError: unknown;
 
         try {
-            result = await ChildProcess(
+            const runResult = await ChildProcess(
                 "docker",
                 [
                     "run",
                     "--name",
                     containerName,
+                    "--memory",
+                    memory,
+                    "--cpus",
+                    cpus,
+                    "--pids-limit",
+                    pidsLimit,
                     "--user",
                     "node",
                     "-w",
@@ -363,6 +479,21 @@ export function createDockerAgent(options: DockerAgentOptions): DockerAgent {
                 ],
                 { timeout, env },
             );
+
+            if (runResult.exitCode !== 0) {
+                const resourceLimit = await detectResourceLimit(
+                    containerName,
+                    runResult,
+                    { memory, pidsLimit },
+                );
+
+                result =
+                    resourceLimit === null
+                        ? runResult
+                        : { ...runResult, resourceLimit };
+            } else {
+                result = runResult;
+            }
         } catch (error) {
             executionError = error;
         } finally {

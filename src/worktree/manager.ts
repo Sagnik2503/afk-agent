@@ -102,6 +102,10 @@ export async function removeWorktree(
     }
 }
 
+export function taskWorktreePath(repoPath: string, taskId: string): string {
+    return path.join(repoPath, ".afk", "worktrees", taskId);
+}
+
 export async function setupWorktree(
     repoPath: string,
     taskId: string,
@@ -118,11 +122,9 @@ export async function setupWorktree(
     const existingWorktrees = await listWorktrees(repoPath);
 
     const branchName = `afk/${taskId}`;
-    const worktreePath = path.join(repoPath, ".afk", "worktrees", taskId);
-    const resolvedWorktreePath = path.join(
+    const worktreePath = taskWorktreePath(repoPath, taskId);
+    const resolvedWorktreePath = taskWorktreePath(
         await fs.realpath(repoPath),
-        ".afk",
-        "worktrees",
         taskId,
     );
 

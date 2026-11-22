@@ -201,6 +201,47 @@ describe("runTask", () => {
         expect(imageOrder).toBeLessThan(retryOrder);
     });
 
+    it("announces image preparation and sandbox execution phases", async () => {
+        const phases: string[] = [];
+
+        await runTask({
+            ...input,
+            onPhase: (phase) => {
+                phases.push(phase);
+            },
+        });
+
+        expect(phases).toEqual(["image", "sandbox"]);
+    });
+
+    it("awaits async phase callbacks before continuing", async () => {
+        const events: string[] = [];
+        agent.prepareImage.mockImplementation(async () => {
+            events.push("prepare");
+        });
+
+        await runTask({
+            ...input,
+            onPhase: async (phase) => {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                events.push(phase);
+            },
+        });
+
+        expect(events).toEqual(["image", "prepare", "sandbox"]);
+    });
+
+    it("passes the attempt callback through to retries", async () => {
+        const onAttempt = vi.fn();
+
+        await runTask({ ...input, onAttempt });
+
+        expect(mockedRunWithRetries).toHaveBeenCalledWith(
+            expect.objectContaining({ onAttempt }),
+            expect.anything(),
+        );
+    });
+
     it("passes the resolved repo path to the agent and worktree manager", async () => {
         await runTask({ ...input, repoPath: "relative/repo" });
 
@@ -232,6 +273,24 @@ describe("runTask", () => {
             model: "anthropic/claude",
             imageName: "custom:1",
             timeout: 1_000,
+        });
+    });
+
+    it("passes resource limit overrides through to the agent", async () => {
+        await runTask({
+            ...input,
+            memory: "4g",
+            cpus: "0.5",
+            pidsLimit: "1024",
+        });
+
+        expect(mockedCreateDockerAgent).toHaveBeenCalledWith({
+            repoPath: "/repo",
+            taskId: input.taskId,
+            issueId: input.issueId,
+            memory: "4g",
+            cpus: "0.5",
+            pidsLimit: "1024",
         });
     });
 

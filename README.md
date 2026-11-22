@@ -182,15 +182,17 @@ All attempts are reported, and changes accumulate in the same worktree.
 
 ```bash
 npm install -g afk-agent
+afk --version
 cd path/to/your-repo
 afk setup
 ```
 
-`afk setup` checks Git, the Docker daemon, GitHub CLI authentication, and that
-the target path is a Git repository. The path defaults to the current directory;
-pass one (`afk setup path/to/repo`) to check a different clone. It reports every
-failure at once with what to do next, then builds the Sandbox image for the
-installed CLI version. It writes no configuration and is safe to run again.
+`afk --version` prints the installed release. `afk setup` checks Git, the Docker
+daemon, GitHub CLI authentication, and that the target path is a Git repository.
+The path defaults to the current directory; pass one (`afk setup path/to/repo`)
+to check a different clone. It reports every failure at once with what to do
+next, then builds the Sandbox image for the installed CLI version. It writes no
+configuration and is safe to run again.
 
 To try it without a global install:
 
@@ -244,10 +246,22 @@ AFK Agent will:
 | -------------------- | ------------------------------------------------------- |
 | `--model <model>`    | Model used inside the Sandbox.                          |
 | `--timeout <ms>`     | Agent run time limit in milliseconds.                   |
+| `--memory <size>`    | Sandbox memory ceiling, e.g. `2g` (default: `2g`).      |
+| `--cpus <count>`     | Sandbox CPU ceiling (default: `2`).                     |
+| `--pids-limit <n>`   | Sandbox process-count ceiling (default: `512`).         |
 | `--test-command <c>` | Command used to validate changes (default: `npm test`). |
 | `--image <image>`    | Use a supplied Sandbox image instead of building one.   |
 | `--no-push`          | Keep the branch local; also skips the pull request.     |
 | `--no-pr`            | Push the branch but skip the pull request.              |
+
+Every Sandbox starts with a memory, CPU, and process-count ceiling so an
+unattended agent run cannot exhaust the host. The defaults are 2g of memory,
+2 CPUs, and 512 processes; the `--memory`, `--cpus`, and `--pids-limit` flags
+override them for a single run. Memory accepts a positive number with an
+optional `b`, `k`, `m`, or `g` unit, CPUs accept a positive decimal, and the
+process limit accepts a positive integer. Invalid values are rejected before
+the Sandbox starts. If an Attempt is killed for exceeding a limit, it stops
+without retrying and the report names the limit and the flag to raise.
 
 ### Providers and credentials
 
@@ -321,6 +335,18 @@ Run the CLI from source:
 ```bash
 npm run dev -- run --repo . --issue 142
 ```
+
+### Releasing
+
+Releases are published to npm by the `Publish` workflow. To cut one:
+
+1. Bump `version` in `package.json` and commit the change.
+2. Push a tag matching the version, for example `v0.2.0` for version `0.2.0`.
+3. Store an npm automation token in the repository's `NPM_TOKEN` secret.
+
+The workflow runs the same quality checks as CI, verifies the tag matches the
+manifest version, and only then publishes the package. A missing `NPM_TOKEN`
+secret fails the job before publishing with a clear error.
 
 ---
 

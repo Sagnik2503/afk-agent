@@ -35,6 +35,8 @@ export function buildReport(input: ReportInput): HarnessReport {
 
     if (agentResult.timedOut) {
         reasons.push("agent timed out");
+    } else if (agentResult.resourceLimit) {
+        reasons.push(agentResult.resourceLimit.message);
     } else if (agentResult.exitCode !== 0) {
         reasons.push(
             agentResult.exitCode === null
