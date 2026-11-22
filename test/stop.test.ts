@@ -62,7 +62,7 @@ function record(
         branchName: "afk/issue-5-demo",
         state: "running",
         phase: "running",
-        attempt: 1,
+        attempts: 1,
         pid: 2_000_000_000,
         startedAt: now,
         updatedAt: now,
@@ -224,13 +224,21 @@ describe("stopRun", () => {
             "issue-5-demo",
         );
         await writeFile(join(worktreePath, "leftover.txt"), "work in progress");
-        await saveRunRecord(record(repoPath));
+        const coordinator = spawn(
+            execPath,
+            ["-e", "setInterval(() => {}, 1000)"],
+            { detached: true, stdio: "ignore" },
+        );
+        coordinator.on("exit", () => {});
+        coordinator.unref();
+        await saveRunRecord(record(repoPath, { pid: coordinator.pid! }));
         const run = vi.fn(async () => processResult());
 
         const result = await stopRun({ repoPath, issueNumber: 5 }, { run });
 
         expect(result.cleanupError).toBeNull();
         expect(result.record.state).toBe("stopped");
+        await waitForDeath(coordinator.pid!);
         await expect(access(worktreePath)).rejects.toThrow();
 
         const branch = await ChildProcess(
@@ -260,7 +268,14 @@ describe("stopRun", () => {
 
     it("tolerates a sandbox that is already gone", async () => {
         const repoPath = await makeRepo();
-        await saveRunRecord(record(repoPath));
+        const coordinator = spawn(
+            execPath,
+            ["-e", "setInterval(() => {}, 1000)"],
+            { detached: true, stdio: "ignore" },
+        );
+        coordinator.on("exit", () => {});
+        coordinator.unref();
+        await saveRunRecord(record(repoPath, { pid: coordinator.pid! }));
         const run = vi.fn(async () =>
             processResult({
                 exitCode: 1,
@@ -272,6 +287,27 @@ describe("stopRun", () => {
 
         expect(result.cleanupError).toBeNull();
         expect(result.record.state).toBe("stopped");
+        await waitForDeath(coordinator.pid!);
+    });
+
+    it("cleans up a stale run but reports no running agent", async () => {
+        const repoPath = await makeRepo();
+        const { worktreePath } = await setupWorktree(repoPath, "issue-5-demo");
+        await saveRunRecord(record(repoPath));
+        await writeLock(repoPath, "issue-5-demo", 2_000_000_000);
+        const run = vi.fn(async () => processResult());
+
+        await expect(
+            stopRun({ repoPath, issueNumber: 5 }, { run }),
+        ).rejects.toThrow(`No running agent for issue 5 in ${repoPath}.`);
+
+        await expect(access(worktreePath)).rejects.toThrow();
+        await expect(
+            readTaskLock(repoPath, "issue-5-demo"),
+        ).resolves.toBeNull();
+        const stopped = await readRunRecord(repoPath, "issue-5-demo");
+        expect(stopped?.state).toBe("stopped");
+        expect(stopped?.finishedAt).toEqual(expect.any(String));
     });
 
     it("force-kills a coordinator that ignores SIGTERM", async () => {
@@ -311,8 +347,15 @@ describe("stopRun", () => {
 
     it("records the stop even when Docker is unreachable", async () => {
         const repoPath = await makeRepo();
-        await saveRunRecord(record(repoPath));
-        await writeLock(repoPath, "issue-5-demo", 2_000_000_000);
+        const coordinator = spawn(
+            execPath,
+            ["-e", "setInterval(() => {}, 1000)"],
+            { detached: true, stdio: "ignore" },
+        );
+        coordinator.on("exit", () => {});
+        coordinator.unref();
+        await saveRunRecord(record(repoPath, { pid: coordinator.pid! }));
+        await writeLock(repoPath, "issue-5-demo", coordinator.pid!);
         const run = vi.fn(async () => {
             throw new Error("Cannot connect to the Docker daemon");
         });
@@ -326,5 +369,6 @@ describe("stopRun", () => {
         await expect(
             readTaskLock(repoPath, "issue-5-demo"),
         ).resolves.toBeNull();
+        await waitForDeath(coordinator.pid!);
     });
 });

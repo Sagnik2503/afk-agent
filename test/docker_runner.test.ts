@@ -354,7 +354,7 @@ describe("createDockerAgent", () => {
         expect(mockedChildProcess).not.toHaveBeenCalled();
     });
 
-    it("reports a memory limit kill on OOM or exit 137", async () => {
+    it("reports a memory limit kill when Docker reports OOMKilled", async () => {
         mockedChildProcess
             .mockResolvedValueOnce(result())
             .mockResolvedValueOnce(result({ exitCode: 137 }))
@@ -380,6 +380,36 @@ describe("createDockerAgent", () => {
             "{{json .State}}",
             "afk-task-1",
         ]);
+    });
+
+    it("does not blame the memory limit for exit 137 without OOM evidence", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(result({ exitCode: 137 }))
+            .mockResolvedValueOnce(result({ stdout: "{}" }))
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const runResult = await agent.run("Fix it");
+
+        expect(runResult.resourceLimit).toBeUndefined();
+        expect(runResult.exitCode).toBe(137);
+    });
+
+    it("does not blame the memory limit for a timed-out run killed with SIGKILL", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result())
+            .mockResolvedValueOnce(
+                result({ exitCode: 137, timedOut: true, signal: "SIGKILL" }),
+            )
+            .mockResolvedValueOnce(result({ stdout: "{}" }))
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const runResult = await agent.run("Fix it");
+
+        expect(runResult.resourceLimit).toBeUndefined();
+        expect(runResult.timedOut).toBe(true);
     });
 
     it("inspects the container before removing it after a limit kill", async () => {

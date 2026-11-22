@@ -15,7 +15,7 @@ export type RunRecord = {
     branchName: string;
     state: RunState;
     phase: string;
-    attempt: number;
+    attempts: number;
     pid: number | null;
     startedAt: string;
     updatedAt: string;
@@ -24,6 +24,13 @@ export type RunRecord = {
     report: HarnessReport | null;
     sync: SyncInfo | null;
     error: string | null;
+};
+
+export type RunRecordIdentity = {
+    repoPath: string;
+    taskId: string;
+    issueId: string;
+    issueNumber: number;
 };
 
 export function runsRoot(repoPath: string): string {
@@ -51,43 +58,48 @@ export async function saveRunRecord(record: RunRecord): Promise<void> {
     );
 }
 
-export type RunRecordUpdate = {
-    repoPath: string;
-    taskId: string;
-    issueId: string;
-    issueNumber: number;
-    state: RunState;
-    phase: string;
-    attempt: number;
-    pid: number;
-    report: HarnessReport | null;
-    sync: SyncInfo | null;
-    error: string | null;
-    finishedAt?: string | null;
-};
+export type RunRecordUpdate = RunRecordIdentity & Partial<RunRecord>;
 
-export async function updateRunRecord(input: RunRecordUpdate): Promise<void> {
-    const existing = await readRunRecord(input.repoPath, input.taskId);
-    const now = new Date().toISOString();
-
-    await saveRunRecord({
+function newRunRecord(
+    input: RunRecordIdentity,
+    pid: number | null,
+    now: string,
+): RunRecord {
+    return {
         taskId: input.taskId,
         issueId: input.issueId,
         issueNumber: input.issueNumber,
         repoPath: input.repoPath,
         branchName: `afk/${input.taskId}`,
-        state: input.state,
-        phase: input.phase,
-        attempt: input.attempt,
-        pid: input.pid,
-        startedAt: existing?.startedAt ?? now,
+        state: "running",
+        phase: "starting",
+        attempts: 0,
+        pid,
+        startedAt: now,
         updatedAt: now,
-        finishedAt: input.finishedAt ?? null,
+        finishedAt: null,
         logPath: runLogPath(input.repoPath, input.taskId),
-        report: input.report,
-        sync: input.sync,
-        error: input.error,
-    });
+        report: null,
+        sync: null,
+        error: null,
+    };
+}
+
+// A new run for the same task resets the record; in-run updates merge into it.
+export async function startRunRecord(
+    input: RunRecordIdentity & { pid: number },
+): Promise<void> {
+    await saveRunRecord(
+        newRunRecord(input, input.pid, new Date().toISOString()),
+    );
+}
+
+export async function updateRunRecord(input: RunRecordUpdate): Promise<void> {
+    const existing = await readRunRecord(input.repoPath, input.taskId);
+    const now = new Date().toISOString();
+    const base = existing ?? newRunRecord(input, null, now);
+
+    await saveRunRecord({ ...base, ...input, updatedAt: now });
 }
 
 export async function readRunRecord(
@@ -136,65 +148,4 @@ export function resolveRunState(record: RunRecord): RunDisplayState {
     }
 
     return record.state;
-}
-
-export function formatRunList(records: RunRecord[]): string {
-    if (records.length === 0) {
-        return "No runs found.";
-    }
-
-    const rows = records.map((record) => {
-        const state = resolveRunState(record);
-        const outcome =
-            record.state === "running"
-                ? record.phase
-                : (record.error ?? record.phase);
-
-        return [
-            `#${record.issueNumber}`,
-            record.taskId,
-            state,
-            record.startedAt,
-            String(record.attempt),
-            outcome,
-        ].join("\t");
-    });
-
-    return [
-        ["ISSUE", "TASK", "STATE", "STARTED", "ATTEMPT", "PHASE"].join("\t"),
-        ...rows,
-    ].join("\n");
-}
-
-export function formatRunDetail(record: RunRecord): string {
-    const lines = [
-        `Issue: #${record.issueNumber}`,
-        `Task: ${record.taskId}`,
-        `Branch: ${record.branchName}`,
-        `State: ${resolveRunState(record)}`,
-        `Phase: ${record.phase}`,
-        `Started: ${record.startedAt}`,
-        `Finished: ${record.finishedAt ?? "-"}`,
-        `Attempts: ${record.attempt}`,
-        `GitHub sync: ${formatSync(record.sync)}`,
-        `Pull request: ${record.sync?.prUrl ?? "-"}`,
-    ];
-
-    if (record.error !== null) {
-        lines.push(`Error: ${record.error}`);
-    }
-
-    return lines.join("\n");
-}
-
-function formatSync(sync: SyncInfo | null): string {
-    if (sync === null) {
-        return "-";
-    }
-
-    if (!sync.pushed) {
-        return `not pushed (${sync.pushError ?? "unknown"})`;
-    }
-
-    return sync.commented ? "pushed, commented" : "pushed";
 }

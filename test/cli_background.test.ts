@@ -1,21 +1,25 @@
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execPath } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+    findRunForIssue,
     runLogPath,
     saveRunRecord,
     type RunRecord,
 } from "../src/harness/run_record.js";
+import { readTaskLock } from "../src/harness/lock.js";
 
 const cliPath = new URL("../src/cli.ts", import.meta.url).pathname;
 const repos: string[] = [];
 
 async function makeRepo(): Promise<string> {
-    const repo = await mkdtemp(join(tmpdir(), "afk-agent-cli-"));
+    const repo = await realpath(
+        await mkdtemp(join(tmpdir(), "afk-agent-cli-")),
+    );
     execFileSync("git", ["init", "--quiet"], { cwd: repo });
     repos.push(repo);
     return repo;
@@ -58,7 +62,7 @@ function record(
         branchName: "afk/issue-5-demo",
         state: "succeeded",
         phase: "finished",
-        attempt: 1,
+        attempts: 1,
         pid: 2_000_000_000,
         startedAt: now,
         updatedAt: now,
@@ -156,6 +160,7 @@ describe("afk logs", () => {
         expect(code).toBe(0);
         expect(stdout).toContain("agent output");
         expect(stdout).toContain("report: success");
+        expect(stdout).toContain(`End of logs for Issue #5 in ${repoPath}.`);
     });
 });
 
@@ -167,4 +172,83 @@ describe("afk help", () => {
         const runHelp = await runCli(["help", "run"]);
         expect(runHelp.stdout).toContain("--background");
     });
+});
+
+describe("afk run --background", () => {
+    async function waitForChild(
+        repoPath: string,
+        taskId: string,
+    ): Promise<void> {
+        for (let i = 0; i < 400; i += 1) {
+            if ((await readTaskLock(repoPath, taskId)) === null) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("background child did not release the lock");
+    }
+
+    it("returns promptly without fetching the GitHub issue", async () => {
+        const repoPath = await makeRepo();
+
+        const { code, stdout } = await runCli([
+            "run",
+            "--background",
+            "--repo",
+            repoPath,
+            "--issue",
+            "5",
+        ]);
+
+        expect(code).toBe(0);
+        expect(stdout).toContain("Started AFK run in the background.");
+        expect(stdout).toContain("Task ID: issue-5");
+        expect(stdout).toContain("Branch: afk/issue-5");
+        expect(stdout).toContain("Log:");
+        expect(stdout).toContain(
+            `Watch: afk logs --repo ${repoPath} --issue 5`,
+        );
+        expect(stdout).toContain(
+            `Check: afk status --repo ${repoPath} --issue 5`,
+        );
+        expect(stdout).toContain(`Stop: afk stop --repo ${repoPath} --issue 5`);
+
+        const started = await findRunForIssue(repoPath, 5);
+        expect(started?.taskId).toBe("issue-5");
+
+        await waitForChild(repoPath, "issue-5");
+
+        // The child owns the record after spawn: it must write its own outcome.
+        const finished = await findRunForIssue(repoPath, 5);
+        expect(finished?.state).toBe("failed");
+        expect(finished?.error).not.toBeNull();
+    }, 30_000);
+
+    it("starts a fresh log and record for a re-run", async () => {
+        const repoPath = await makeRepo();
+        const args = [
+            "run",
+            "--background",
+            "--repo",
+            repoPath,
+            "--issue",
+            "5",
+        ];
+
+        await runCli(args);
+        await waitForChild(repoPath, "issue-5");
+        const first = await findRunForIssue(repoPath, 5);
+        await writeFile(runLogPath(repoPath, "issue-5"), "STALE LOG LINE\n", {
+            flag: "a",
+        });
+
+        const { code } = await runCli(args);
+        expect(code).toBe(0);
+        await waitForChild(repoPath, "issue-5");
+
+        const second = await findRunForIssue(repoPath, 5);
+        expect(second?.startedAt).not.toBe(first?.startedAt);
+        const log = await readFile(runLogPath(repoPath, "issue-5"), "utf8");
+        expect(log).not.toContain("STALE LOG LINE");
+    }, 60_000);
 });

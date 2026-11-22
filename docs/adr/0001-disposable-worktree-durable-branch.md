@@ -44,3 +44,11 @@ Treat the Worktree as disposable scratch and the branch as the durable record.
   that need the default refusal keep it.
 - The task result reports whether the Worktree was removed, and the CLI points
   at the Worktree path only when it still exists.
+
+## Amendments
+
+- **Cancellation (`afk stop`):** stopping a run disposes of the Worktree without
+  GitHub sync, an exception to the ordering rule above. Cancellation is
+  deliberately immediate: the agent is killed mid-attempt, so there is no
+  finished run to push or comment on. Leftover changes are still committed to
+  the branch (best effort) before removal, so the durable record survives.

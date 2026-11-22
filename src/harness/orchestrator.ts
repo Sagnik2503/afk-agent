@@ -4,7 +4,7 @@ import {
     createDockerAgent,
     type DockerAgentOptions,
 } from "../agent/docker_runner.js";
-import { removeWorktree, setupWorktree } from "../worktree/manager.js";
+import { setupWorktree } from "../worktree/manager.js";
 import {
     buildIssueComment,
     commitLeftovers,
@@ -23,6 +23,8 @@ import {
 } from "../github/pull_request.js";
 import type { GitHubIssue } from "../github/fetch_issues.js";
 import { getChangedFiles } from "./change.js";
+import { disposeWorktree, type DisposeWorktreeInput } from "./dispose.js";
+import { errorMessage } from "../errors.js";
 import type { HarnessReport } from "./report.js";
 import { runWithRetries } from "./retry.js";
 import { runTests } from "./validation.js";
@@ -34,7 +36,8 @@ export type RunTaskInput = {
     taskId?: string;
     issueId: string;
     prompt: string;
-    onPhase?: (phase: RunPhase) => void;
+    onPhase?: (phase: RunPhase) => void | Promise<void>;
+    onAttempt?: (attempt: number) => void | Promise<void>;
     issue?: GitHubIssue;
     push?: boolean;
     pr?: boolean;
@@ -74,56 +77,12 @@ export type RunTaskResult = {
     cleanupError: string | null;
 };
 
-function getErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
 function isSuccess(reports: HarnessReport[], error: string | null): boolean {
     return reports.at(-1)?.success === true && error === null;
 }
 
-async function disposeWorktree(
-    input: {
-        repoPath: string;
-        worktreePath: string;
-        taskId: string;
-        attempt: number;
-    },
-    deps: RunTaskDependencies,
-): Promise<{ removed: boolean; error: string | null }> {
-    let commitError: string | null = null;
-
-    try {
-        await commitLeftovers(
-            {
-                worktreePath: input.worktreePath,
-                taskId: input.taskId,
-                attempt: input.attempt,
-            },
-            deps,
-        );
-    } catch (error) {
-        commitError = getErrorMessage(error);
-    }
-
-    try {
-        await removeWorktree(input.repoPath, input.worktreePath, {
-            force: true,
-        });
-        return { removed: true, error: commitError };
-    } catch (error) {
-        const removalError = getErrorMessage(error);
-        return {
-            removed: false,
-            error: commitError
-                ? `${commitError}; ${removalError}`
-                : removalError,
-        };
-    }
-}
-
 async function disposeAfterFailure(
-    input: Parameters<typeof disposeWorktree>[0],
+    input: DisposeWorktreeInput,
     deps: RunTaskDependencies,
 ): Promise<void> {
     const { error } = await disposeWorktree(input, deps);
@@ -237,7 +196,7 @@ async function syncAfterRun(
                 created: false,
                 reused: false,
                 url: null,
-                error: getErrorMessage(error),
+                error: errorMessage(error),
             };
         }
     }
@@ -282,7 +241,7 @@ async function safeSync(
         return {
             pushed: false,
             branchUrl: null,
-            pushError: getErrorMessage(error),
+            pushError: errorMessage(error),
             commented: false,
             commentError: null,
             prUrl: null,
@@ -336,7 +295,7 @@ export async function runTask(
     const { branchName, worktreePath } = await setupWorktree(repoPath, taskId);
 
     try {
-        input.onPhase?.("image");
+        await input.onPhase?.("image");
         await agent.prepareImage();
     } catch (error) {
         await disposeAfterFailure(
@@ -357,12 +316,15 @@ export async function runTask(
     let retryResult;
 
     try {
-        input.onPhase?.("sandbox");
+        await input.onPhase?.("sandbox");
         retryResult = await runWithRetries(
             {
                 taskId,
                 worktreePath,
                 prompt: input.prompt,
+                ...(input.onAttempt !== undefined
+                    ? { onAttempt: input.onAttempt }
+                    : {}),
             },
             {
                 runAgent: (_worktreePath, prompt) => agent.run(prompt),
@@ -381,7 +343,7 @@ export async function runTask(
                     ...syncInput,
                     issue: input.issue,
                     reports: [],
-                    error: getErrorMessage(error),
+                    error: errorMessage(error),
                 },
                 deps,
             );

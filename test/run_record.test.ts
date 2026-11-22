@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     findRunForIssue,
-    formatRunDetail,
-    formatRunList,
     listRunRecords,
     readRunRecord,
     resolveRunState,
     runLogPath,
     runRecordPath,
     saveRunRecord,
+    startRunRecord,
+    updateRunRecord,
     type RunRecord,
 } from "../src/harness/run_record.js";
 
@@ -33,7 +33,7 @@ function record(overrides: Partial<RunRecord> = {}): RunRecord {
         branchName: "afk/issue-20-background",
         state: "running",
         phase: "running",
-        attempt: 0,
+        attempts: 0,
         pid: process.pid,
         startedAt: now,
         updatedAt: now,
@@ -132,7 +132,6 @@ describe("run records", () => {
         const [run] = await listRunRecords(repoPath);
         expect(run).toBeDefined();
         expect(resolveRunState(run!)).toBe("stale");
-        expect(formatRunList([run!])).toContain("stale");
     });
 
     it("keeps a live process running", () => {
@@ -140,51 +139,86 @@ describe("run records", () => {
     });
 });
 
-describe("run formatting", () => {
-    it("lists issue, task, state, start, attempt, and phase", () => {
-        const output = formatRunList([
-            record({
-                startedAt: "2026-01-01T00:00:00.000Z",
-                attempt: 2,
-                phase: "running",
-            }),
-        ]);
+describe("run lifecycle updates", () => {
+    it("starts a fresh run over a finished record", async () => {
+        const repoPath = await makeRepo();
+        const old = record({
+            repoPath,
+            state: "failed",
+            phase: "failed",
+            attempts: 3,
+            startedAt: "2026-01-01T00:00:00.000Z",
+            finishedAt: "2026-01-01T00:10:00.000Z",
+            error: "boom",
+            pid: 2_000_000_000,
+        });
+        await saveRunRecord(old);
 
-        expect(output).toContain("#20");
-        expect(output).toContain("issue-20-background");
-        expect(output).toContain("running");
-        expect(output).toContain("2026-01-01T00:00:00.000Z");
-        expect(output).toContain("2");
-        expect(output).toContain("running");
+        await startRunRecord({
+            repoPath,
+            taskId: old.taskId,
+            issueId: "20",
+            issueNumber: 20,
+            pid: process.pid,
+        });
+
+        const fresh = await readRunRecord(repoPath, old.taskId);
+        expect(fresh).toMatchObject({
+            state: "running",
+            phase: "starting",
+            attempts: 0,
+            pid: process.pid,
+            finishedAt: null,
+            error: null,
+            report: null,
+            sync: null,
+        });
+        expect(fresh?.startedAt).not.toBe(old.startedAt);
     });
 
-    it("shows branch, attempts, sync, and pull request in the detail view", () => {
-        const output = formatRunDetail(
-            record({
-                state: "succeeded",
-                phase: "finished",
-                attempt: 1,
-                finishedAt: "2026-01-01T00:05:00.000Z",
-                sync: {
-                    pushed: true,
-                    branchUrl: "https://github.com/acme/repo/tree/afk/issue-20",
-                    pushError: null,
-                    commented: true,
-                    commentError: null,
-                    prUrl: "https://github.com/acme/repo/pull/7",
-                    prCreated: true,
-                    prReused: false,
-                    prError: null,
-                },
-            }),
-        );
+    it("merges phase and attempt updates without resetting the start time", async () => {
+        const repoPath = await makeRepo();
+        const identity = {
+            repoPath,
+            taskId: "issue-20-background",
+            issueId: "20",
+            issueNumber: 20,
+        };
+        await startRunRecord({ ...identity, pid: process.pid });
+        const started = await readRunRecord(repoPath, identity.taskId);
 
-        expect(output).toContain("Branch: afk/issue-20-background");
-        expect(output).toContain("Attempts: 1");
-        expect(output).toContain("GitHub sync: pushed, commented");
-        expect(output).toContain(
-            "Pull request: https://github.com/acme/repo/pull/7",
-        );
+        await updateRunRecord({ ...identity, phase: "sandbox", attempts: 2 });
+
+        const updated = await readRunRecord(repoPath, identity.taskId);
+        expect(updated?.startedAt).toBe(started?.startedAt);
+        expect(updated?.phase).toBe("sandbox");
+        expect(updated?.attempts).toBe(2);
+        expect(updated?.state).toBe("running");
+    });
+
+    it("creates a record with defaults when none exists", async () => {
+        const repoPath = await makeRepo();
+
+        await updateRunRecord({
+            repoPath,
+            taskId: "issue-20-background",
+            issueId: "20",
+            issueNumber: 20,
+            state: "failed",
+            phase: "failed",
+            error: "boom",
+        });
+
+        const created = await readRunRecord(repoPath, "issue-20-background");
+        expect(created).toMatchObject({
+            state: "failed",
+            attempts: 0,
+            pid: null,
+            finishedAt: null,
+            error: "boom",
+            branchName: "afk/issue-20-background",
+        });
+        expect(created?.startedAt).toEqual(expect.any(String));
     });
 });
 

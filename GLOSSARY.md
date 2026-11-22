@@ -44,6 +44,14 @@ _Avoid_: run log, post-mortem log
 One bounded execution of the coding agent inside the sandbox. Attempts after a failure are new runs, not continuations.
 _Avoid_: session, invocation
 
+**Background run**:
+A task execution started with `afk run --background`: the CLI hands the work to a detached child and returns immediately while the run continues unattended.
+_Avoid_: daemon, detached job
+
+**Run record**:
+The persisted state of one Background run: its phase, Attempt count (one Attempt per Agent run), process, timestamps, and outcome. Re-running the same Task ID resets the record instead of continuing it.
+_Avoid_: run log (that is the child's output), status file
+
 ### Outcomes
 
 **Attempt**:

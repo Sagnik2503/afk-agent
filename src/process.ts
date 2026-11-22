@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 
 export type ResourceLimit = {
-    kind: "memory" | "cpus" | "pids";
+    kind: "memory" | "pids";
     value: string;
     message: string;
 };

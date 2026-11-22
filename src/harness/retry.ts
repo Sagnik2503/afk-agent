@@ -1,4 +1,5 @@
 import type { ProcessResult } from "../process.js";
+import { errorMessage } from "../errors.js";
 import { buildReport, type HarnessReport } from "./report.js";
 import type { TestResult } from "./validation.js";
 
@@ -14,16 +15,13 @@ export type RetryInput = {
     taskId: string;
     worktreePath: string;
     prompt: string;
+    onAttempt?: (attempt: number) => void | Promise<void>;
 };
 
 export type RetryResult = {
     reports: HarnessReport[];
     error: string | null;
 };
-
-function getErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
 
 function buildRetryPrompt(
     prompt: string,
@@ -54,6 +52,8 @@ export async function runWithRetries(
     let prompt = input.prompt;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        await input.onAttempt?.(attempt);
+
         // Agent launch errors propagate to the caller.
         const agentResult = await deps.runAgent(input.worktreePath, prompt);
 
@@ -62,7 +62,7 @@ export async function runWithRetries(
         try {
             testResult = await deps.runTests(input.worktreePath);
         } catch (error) {
-            return { reports, error: getErrorMessage(error) };
+            return { reports, error: errorMessage(error) };
         }
 
         let changedFiles: string[];
@@ -80,7 +80,7 @@ export async function runWithRetries(
 
             reports.push(report);
 
-            return { reports, error: getErrorMessage(error) };
+            return { reports, error: errorMessage(error) };
         }
 
         const report = buildReport({

@@ -97,6 +97,31 @@ describe("buildReport", () => {
         expect(report.reasons).not.toContain("agent exited with code 137");
     });
 
+    it("names the timeout before a resource limit when both are present", () => {
+        const report = buildReport({
+            taskId: "task-1",
+            agentResult: makeAgentResult({
+                exitCode: 137,
+                timedOut: true,
+                signal: "SIGKILL",
+                resourceLimit: {
+                    kind: "memory",
+                    value: "2g",
+                    message:
+                        "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+                },
+            }),
+            testResult: makeTestResult(),
+            changedFiles: ["src/a.ts"],
+        });
+
+        expect(report.executionStatus).toBe("timed_out");
+        expect(report.reasons).toContain("agent timed out");
+        expect(report.reasons).not.toContain(
+            "sandbox exceeded its memory limit (2g); raise --memory to allow more",
+        );
+    });
+
     it("reports failure when the agent was killed without timing out", () => {
         const report = buildReport({
             taskId: "task-1",

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,14 @@ import {
     readTaskLock,
     releaseTaskLock,
 } from "../src/harness/lock.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs/promises")>();
+    return {
+        ...actual,
+        rename: vi.fn(actual.rename),
+    };
+});
 
 const repos: string[] = [];
 
@@ -101,6 +109,71 @@ describe("acquireTaskLock", () => {
 
         const lock = await readTaskLock(repoPath, "issue-1-demo");
         expect(lock?.pid).toBe(process.pid);
+    });
+
+    it("does not delete a live lock acquired while reclaiming a dead one", async () => {
+        const repoPath = await makeRepo();
+        const lockDir = join(repoPath, ".afk", "locks");
+        const { mkdir } = await import("node:fs/promises");
+        await mkdir(lockDir, { recursive: true });
+        const lockFile = join(lockDir, "issue-1-demo.lock");
+        await writeFile(
+            lockFile,
+            JSON.stringify({
+                pid: 2_000_000_000,
+                taskId: "issue-1-demo",
+                issueId: "1",
+                repoPath,
+                startedAt: new Date().toISOString(),
+            }),
+        );
+
+        // Pause the first reclaimer's reclaim step until a second acquirer
+        // has taken the lock, reproducing the read-then-reclaim race.
+        const fs = await import("node:fs/promises");
+        const renameMock = vi.mocked(fs.rename);
+        const realRename = renameMock.getMockImplementation()!;
+        let reclaimCalls = 0;
+        let secondDone!: () => void;
+        const secondAcquired = new Promise<void>((resolve) => {
+            secondDone = resolve;
+        });
+        renameMock.mockImplementation(async (from, to) => {
+            if (String(from) === lockFile) {
+                reclaimCalls += 1;
+                if (reclaimCalls === 1) {
+                    await secondAcquired;
+                }
+            }
+            return realRename(from, to);
+        });
+
+        const first = acquireTaskLock({
+            repoPath,
+            taskId: "issue-1-demo",
+            issueId: "1",
+        });
+        const firstOutcome = first.then(
+            () => "fulfilled",
+            (error: Error) => error.message,
+        );
+
+        while (reclaimCalls === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+
+        await acquireTaskLock({
+            repoPath,
+            taskId: "issue-1-demo",
+            issueId: "1",
+        });
+        secondDone();
+
+        expect(await firstOutcome).toMatch(/already running/);
+        await expect(
+            readTaskLock(repoPath, "issue-1-demo"),
+        ).resolves.toMatchObject({ pid: process.pid });
+        renameMock.mockReset();
     });
 
     it("lets different task IDs run at the same time", async () => {
