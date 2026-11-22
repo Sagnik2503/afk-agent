@@ -30,6 +30,8 @@ import {
     releaseTaskLock,
     transferTaskLock,
 } from "./harness/lock.js";
+import { createColors } from "./ui/color.js";
+import { formatRunReport } from "./ui/report.js";
 import {
     findRunForIssue,
     formatRunDetail,
@@ -226,9 +228,20 @@ async function startBackgroundRun(options: RunOptions): Promise<void> {
 
 const program = new Command();
 
+const colors = createColors({
+    isTTY: process.stdout.isTTY === true,
+    env: process.env,
+});
+
+function printPhase(label: string): void {
+    console.log(colors.cyan(`→ ${label}…`));
+}
+
 function printOverview(): void {
-    console.log(`${program.name()} ${packageVersion()}`);
-    console.log(program.description());
+    console.log(
+        `${colors.bold(program.name())} ${colors.dim(packageVersion())}`,
+    );
+    console.log(colors.dim(program.description()));
     console.log("");
     console.log("Commands:");
 
@@ -327,6 +340,7 @@ async function executeRun(
     let failureIssueNumber: number | null = null;
 
     try {
+        printPhase("Validating repository");
         if (!(await reportPreflight(options.repo))) {
             await markBackgroundFailure(
                 options,
@@ -338,9 +352,10 @@ async function executeRun(
 
         const repoPath = await validateRepository(options.repo);
         failureRepoPath = repoPath;
-        console.log("Validated repository:", repoPath);
+        console.log("Repository:", repoPath);
 
         // 1. Fetch GitHub issue
+        printPhase(`Fetching Issue #${options.issue}`);
         const issue = await fetchGitHubIssue(repoPath, options.issue);
         failureIssueNumber = issue.number;
 
@@ -403,6 +418,12 @@ async function executeRun(
                 issueId: options.issue,
                 issue,
                 prompt,
+                onPhase: (phase) =>
+                    printPhase(
+                        phase === "image"
+                            ? "Preparing Sandbox image"
+                            : "Running Sandbox",
+                    ),
                 push: options.push !== false,
                 pr: options.pr !== false,
                 ...(options.model !== undefined
@@ -427,61 +448,14 @@ async function executeRun(
             });
 
             // 4. Display report
-            const lastReport = result.reports.at(-1);
+            const report = formatRunReport(result, {
+                pushEnabled: options.push !== false,
+                color: colors,
+            });
 
-            console.log("\n--- AFK Agent Report ---");
-            console.log("Branch:", result.branchName);
-            console.log(
-                "Worktree:",
-                result.worktreeRemoved
-                    ? "removed (branch kept)"
-                    : result.worktreePath,
-            );
-            if (result.cleanupError) {
-                console.error("Worktree cleanup failed:", result.cleanupError);
-            }
-            console.log("Attempts:", result.reports.length);
-
-            if (result.sync) {
-                console.log(
-                    "GitHub:",
-                    result.sync.pushed
-                        ? result.sync.branchUrl
-                        : `not pushed (${result.sync.pushError})`,
-                );
-                if (!result.sync.commented) {
-                    console.error(
-                        "Issue comment failed:",
-                        result.sync.commentError,
-                    );
-                }
-                if (result.sync.prUrl) {
-                    console.log("Pull request:", result.sync.prUrl);
-                }
-                if (result.sync.prError) {
-                    console.warn("Pull request warning:", result.sync.prError);
-                }
-            }
-
-            const pushFailed =
-                result.sync !== null &&
-                !result.sync.pushed &&
-                options.push !== false;
-
-            if (result.error) {
-                console.error("Execution error:", result.error);
-                process.exitCode = 1;
-            } else if (!lastReport?.success) {
-                console.log("Status: FAILED");
-                process.exitCode = 1;
-            } else if (pushFailed) {
-                console.error(
-                    "Status: FAILED (tests passed, GitHub sync failed)",
-                );
-                process.exitCode = 1;
-            } else {
-                console.log("Status: SUCCESS");
-            }
+            console.log("");
+            console.log(report.text);
+            process.exitCode = report.exitCode;
 
             if (backgroundChild) {
                 await updateRunRecord({
@@ -489,25 +463,15 @@ async function executeRun(
                     taskId,
                     issueId: options.issue,
                     issueNumber: issue.number,
-                    state:
-                        result.error !== null ||
-                        !lastReport?.success ||
-                        pushFailed
-                            ? "failed"
-                            : "succeeded",
+                    state: report.exitCode === 0 ? "succeeded" : "failed",
                     phase: "finished",
                     attempt: result.reports.length,
                     pid: process.pid,
-                    report: lastReport ?? null,
+                    report: result.reports.at(-1) ?? null,
                     sync: result.sync,
                     error: result.error,
                     finishedAt: new Date().toISOString(),
                 });
-            }
-
-            if (lastReport) {
-                console.log("Changed files:", lastReport.changedFiles);
-                console.log("Reasons:", lastReport.reasons);
             }
         } finally {
             process.off("SIGINT", onSigint);
@@ -657,6 +621,12 @@ program
             const issueNumber = parseIssueNumber(options.issue);
             const repoPath = await validateRepository(options.repo);
             const record = await findRunForIssue(repoPath, issueNumber);
+
+            console.log(
+                colors.cyan(
+                    `Sandbox logs for Issue #${issueNumber} in ${repoPath}`,
+                ),
+            );
 
             if (record === null) {
                 await watchSandboxLogs({
