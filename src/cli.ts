@@ -356,11 +356,14 @@ async function executeRun(
             const childTaskId = process.env["AFK_TASK_ID"];
 
             if (childTaskId !== undefined) {
+                failureRepoPath = path.resolve(options.repo);
+                failureTaskId = childTaskId;
+                failureIssueNumber = parseIssueNumber(options.issue);
                 await updateRunRecord({
-                    repoPath: path.resolve(options.repo),
+                    repoPath: failureRepoPath,
                     taskId: childTaskId,
                     issueId: options.issue,
-                    issueNumber: parseIssueNumber(options.issue),
+                    issueNumber: failureIssueNumber,
                     state: "running",
                     phase: "starting",
                     pid: process.pid,
