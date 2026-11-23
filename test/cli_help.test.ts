@@ -52,6 +52,18 @@ describe("afk command overview", () => {
         expect(help.stdout).toContain("afk logs --repo . --issue 142");
     });
 
+    it("lists every command with aligned descriptions", async () => {
+        const { code, stdout } = await runCli(["help"]);
+
+        expect(code).toBe(0);
+        expect(stdout).toContain("setup   Check prerequisites");
+        expect(stdout).toContain("status  Show background run status");
+        expect(stdout).toContain("stop    Stop a running background AFK agent");
+        expect(stdout).toContain("afk status --repo .");
+        expect(stdout).toContain("afk stop --repo . --issue 142");
+        expect(stdout).toContain("--background");
+    });
+
     it("delegates `afk help run` to the command help with its flags", async () => {
         const { code, stdout } = await runCli(["help", "run"]);
 

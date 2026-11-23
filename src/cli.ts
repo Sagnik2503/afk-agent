@@ -89,6 +89,7 @@ const commandExamples: Record<string, string> = {
     logs: "afk logs --repo . --issue 142",
     status: "afk status --repo .",
     stop: "afk stop --repo . --issue 142",
+    help: "afk help run",
 };
 
 type RunOptions = {
@@ -251,16 +252,23 @@ function printOverview(): void {
     printBanner();
     console.log("Commands:");
 
-    for (const [name, example] of Object.entries(commandExamples)) {
-        const command = program.commands.find((item) => item.name() === name);
+    // Iterate registered commands so a new command can never be missing here.
+    for (const command of program.commands) {
+        const name = command.name();
 
-        if (command) {
-            console.log(`  ${name.padEnd(6)}${command.description()}`);
-            console.log(`         Example: ${example}`);
+        console.log(`  ${name.padEnd(8)}${command.description()}`);
+
+        const example = commandExamples[name];
+
+        if (example !== undefined) {
+            console.log(`          Example: ${example}`);
         }
     }
 
     console.log("");
+    console.log(
+        "Add --background to 'afk run' to detach, then track it with status, logs, and stop.",
+    );
     console.log("Run 'afk help <command>' for command details.");
 }
 

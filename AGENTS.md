@@ -15,6 +15,8 @@ It runs typecheck, lint, format check, and tests, in that order.
 
 Grilling Rules
 
+Always use 'grill- with-docs' skill whenever I ask you to grill me.
+
 Explain before asking: Give the context, why the decision matters, and briefly explain technical terms.
 
 Use examples: Show realistic scenarios to make abstract concepts easy to understand.

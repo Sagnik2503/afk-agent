@@ -209,6 +209,19 @@ npm install -g afk-agent@latest
 The Sandbox image is tagged with the CLI version, so upgrading the CLI builds a
 fresh image on the next run instead of reusing the old agent.
 
+### Commands
+
+| Command      | Purpose                                          |
+| ------------ | ------------------------------------------------ |
+| `afk setup`  | Check prerequisites and build the Sandbox image. |
+| `afk run`    | Run a coding task for a GitHub issue.            |
+| `afk logs`   | Stream the logs of a running agent.              |
+| `afk status` | List background runs, or show one run in detail. |
+| `afk stop`   | Stop a running background agent.                 |
+
+Run `afk` or `afk help` for an overview with examples, and `afk help <command>`
+for the flags of a single command.
+
 ### Run a coding task
 
 ```bash
@@ -223,6 +236,9 @@ the two and refuse to push when they differ.
 `afk run` performs the same preflight checks as `afk setup` and builds the
 versioned Sandbox image if it is missing, so `afk setup` is a convenience rather
 than a hard gate.
+
+A per-task lock refuses overlapping runs: starting the same issue again while a
+run is active fails with the PID of the run holding the lock.
 
 AFK Agent will:
 
@@ -253,6 +269,7 @@ AFK Agent will:
 | `--image <image>`    | Use a supplied Sandbox image instead of building one.   |
 | `--no-push`          | Keep the branch local; also skips the pull request.     |
 | `--no-pr`            | Push the branch but skip the pull request.              |
+| `--background`       | Run in the background and return immediately.           |
 
 Every Sandbox starts with a memory, CPU, and process-count ceiling so an
 unattended agent run cannot exhaust the host. The defaults are 2g of memory,
@@ -287,6 +304,35 @@ Docker records container environment variables, so a forwarded key is visible to
 anyone who can run `docker inspect` on that machine. This is accepted for a
 single-user local tool.
 
+### Background runs
+
+Add `--background` to detach the run and get your terminal back:
+
+```bash
+afk run --repo . --issue 142 --background
+```
+
+The command prints the Task ID, branch, and log path, then returns immediately.
+The run continues in a detached process with the same limits, retries, and
+GitHub sync as a foreground run. Track it with:
+
+```bash
+afk status --repo .              # list all runs, newest first
+afk status --repo . --issue 142  # one run: state, phase, attempts, sync, PR
+afk logs --repo . --issue 142    # follow the run's output
+afk stop --repo . --issue 142    # stop the run
+```
+
+Background runs persist their state under `.afk/runs/<task-id>/`: `run.json`
+(the Run record) and `run.log` (the full run output). These survive the run, so
+`afk logs` can replay the output and `afk status` can show the outcome after the
+agent finishes. A run whose process died without finishing is shown as `stale`;
+`afk stop` cleans it up.
+
+`afk stop` terminates the run (SIGTERM, then SIGKILL if needed), removes the
+Sandbox, commits any leftover changes to the branch, and removes the worktree.
+The branch is kept. A stopped run does not push or comment on the issue.
+
 ### Watch Sandbox logs
 
 Stream the live Sandbox output of a running agent in a second terminal:
@@ -304,9 +350,11 @@ The stream ends when the current Attempt finishes, and you can re-run the comman
 to watch the next Attempt. Press Ctrl-C (or send SIGTERM) to stop watching; this
 also stops the underlying `docker logs` process.
 
-Sandbox logs are ephemeral. The Sandbox is disposable and is removed at the end
-of an agent run, so there is no post-mortem log file to inspect afterwards. Run
-the `logs` command while the agent is still running.
+For foreground runs, Sandbox logs are ephemeral: the Sandbox is disposable and
+is removed at the end of an agent run, so run the `logs` command while the agent
+is still running. Background runs persist their full output to
+`.afk/runs/<task-id>/run.log`, and `afk logs` follows that file across Attempts
+and replays it after the run finishes.
 
 ---
 
@@ -380,7 +428,8 @@ committed; reclaiming a stale worktree does not attempt to commit them.
 
 On success or failure, AFK Agent pushes that branch to `origin` and posts a
 comment on the issue with the branch link, commit list, test result, and any
-remaining problems. The push is refused when the branch is not under `afk/`,
+remaining problems. Runs stopped with `afk stop` are the exception: their
+changes stay local on the branch. The push is refused when the branch is not under `afk/`,
 when `origin` does not match the issue's repository, when the branch would
 need a force-push, or when a changed file looks like a secret (for example
 `.env`, `*.pem`, or `id_rsa`). A refused push does not block worktree cleanup.
@@ -431,15 +480,26 @@ src/
 │   └── sync.ts
 ├── harness/
 │   ├── change.ts
+│   ├── dispose.ts
+│   ├── lock.ts
 │   ├── orchestrator.ts
 │   ├── report.ts
 │   ├── result.ts
 │   ├── retry.ts
+│   ├── run_record.ts
+│   ├── stop.ts
 │   └── validation.ts
+├── ui/
+│   ├── color.ts
+│   ├── report.ts
+│   └── status.ts
 ├── worktree/
 │   └── manager.ts
-├── process.ts
-└── cli.ts
+├── cli.ts
+├── errors.ts
+├── package_info.ts
+├── preflight.ts
+└── process.ts
 
 test/
 ```
@@ -460,11 +520,12 @@ Currently, the focus is on:
 - Test validation and retries.
 - Execution reporting.
 - GitHub pull request creation after successful validation.
+- Background runs with persisted status and logs, and stop support.
+- Per-task locking against overlapping runs.
 
 Future capabilities include:
 
 - Structured implementation summaries.
-- Better execution monitoring and recovery.
 - More granular sandbox permissions and network controls.
 
 ---
