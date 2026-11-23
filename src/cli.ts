@@ -158,6 +158,13 @@ async function startBackgroundRun(options: RunOptions): Promise<void> {
     await acquireTaskLock({ repoPath, taskId, issueId: options.issue });
 
     await mkdir(path.dirname(logPath), { recursive: true });
+    await startRunRecord({
+        repoPath,
+        taskId,
+        issueId: options.issue,
+        issueNumber,
+        pid: process.pid,
+    });
     const logHandle = await open(logPath, "w");
 
     let child;
@@ -205,14 +212,6 @@ async function startBackgroundRun(options: RunOptions): Promise<void> {
 
     await logHandle.close();
     child.unref();
-
-    await startRunRecord({
-        repoPath,
-        taskId,
-        issueId: options.issue,
-        issueNumber,
-        pid,
-    });
 
     console.log("Started AFK run in the background.");
     console.log(
@@ -353,6 +352,22 @@ async function executeRun(
     let failureIssueNumber: number | null = null;
 
     try {
+        if (backgroundChild) {
+            const childTaskId = process.env["AFK_TASK_ID"];
+
+            if (childTaskId !== undefined) {
+                await updateRunRecord({
+                    repoPath: path.resolve(options.repo),
+                    taskId: childTaskId,
+                    issueId: options.issue,
+                    issueNumber: parseIssueNumber(options.issue),
+                    state: "running",
+                    phase: "starting",
+                    pid: process.pid,
+                });
+            }
+        }
+
         printPhase("Validating repository");
         if (!(await reportPreflight(options.repo))) {
             await markBackgroundFailure(
