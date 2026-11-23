@@ -23,6 +23,7 @@
         "minimatch": "^11.0.8"
     },
     "scripts": {
+        "opencode": "opencode --auto",
         "test": "vitest run",
         "typecheck": "tsc --noEmit",
         "build": "tsc -p tsconfig.build.json",
