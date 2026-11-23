@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
     link,
     mkdir,
@@ -22,6 +23,17 @@ function lockPath(repoPath: string, taskId: string): string {
     return path.join(repoPath, ".afk", "locks", `${taskId}.lock`);
 }
 
+function isZombieProcess(pid: number): boolean {
+    try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        // The state field follows the parenthesized command name.
+        const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+        return state === "Z" || state === "X";
+    } catch {
+        return false;
+    }
+}
+
 export function isProcessAlive(pid: number): boolean {
     if (!Number.isSafeInteger(pid) || pid <= 0) {
         return false;
@@ -29,7 +41,7 @@ export function isProcessAlive(pid: number): boolean {
 
     try {
         process.kill(pid, 0);
-        return true;
+        return !isZombieProcess(pid);
     } catch (error) {
         return (error as NodeJS.ErrnoException).code !== "ESRCH";
     }
