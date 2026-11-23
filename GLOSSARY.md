@@ -29,12 +29,16 @@ The repository's default branch (for example `main`), which a Pull request targe
 _Avoid_: target branch, trunk
 
 **Sandbox**:
-The Docker container that runs the agent inside the worktree. A worktree alone is not a security boundary; the sandbox is.
+The Docker container that runs the agent and its Validation inside the worktree. A worktree alone is not a security boundary; the sandbox is.
 _Avoid_: container (when speaking about the guarantee), jail
 
 **Sandbox image**:
-The Docker image built from AFK Agent's packaged `Dockerfile`, tagged with the CLI version, that the Sandbox runs.
-_Avoid_: agent image
+The Docker image containing the agent runtime, built from AFK Agent's packaged `Dockerfile` and maintained under a stable tag. It assumes nothing about the repository's language.
+_Avoid_: agent image, base image (when speaking about what the Sandbox runs)
+
+**Project image**:
+The Sandbox image extended with a repository's own toolchain, defined by a Dockerfile in the repository. The Sandbox runs the Project image when the repository defines one, and the Sandbox image otherwise.
+_Avoid_: custom image, language image
 
 **Sandbox logs**:
 The live stdout and stderr of a running Sandbox. They are streamed while the Sandbox exists and disappear with it; they are not the Run report.
@@ -55,8 +59,12 @@ _Avoid_: run log (that is the child's output), status file
 ### Outcomes
 
 **Attempt**:
-One run plus its test validation. A task has at most three attempts.
+One run plus its Validation. A task has at most three attempts.
 _Avoid_: retry (use as the verb only)
+
+**Validation**:
+The ordered set of checks that an Attempt's work is correct, run after each Agent run. Each repository defines its own Validation. An empty set is a deliberate choice of no checks, not an absence of configuration. Language-agnostic: tests, type checks, linters, or any project-specific check.
+_Avoid_: test command, test validation, check loop
 
 **Run report**:
 The final record of all attempts: what the agent did, test results, and remaining problems.
