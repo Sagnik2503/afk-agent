@@ -31,15 +31,17 @@ function buildRetryPrompt(
     return [
         prompt,
         "",
-        "The previous attempt did not pass the tests. Fix the failures and try again.",
+        "The previous attempt did not pass Validation. Fix the failures and try again.",
+        "",
+        `Failed command: ${testResult.failedCommand}`,
         "",
         "Changed files:",
         ...changedFiles.map((file) => `- ${file}`),
         "",
-        "Test stdout:",
+        "Command stdout:",
         testResult.stdout,
         "",
-        "Test stderr:",
+        "Command stderr:",
         testResult.stderr,
     ].join("\n");
 }

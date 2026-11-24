@@ -29,6 +29,7 @@ import { errorMessage } from "../errors.js";
 import type { HarnessReport } from "./report.js";
 import { runWithRetries } from "./retry.js";
 import { runTests } from "./validation.js";
+import { loadValidationCommands } from "../config.js";
 
 export type RunPhase = "image" | "sandbox";
 
@@ -49,7 +50,6 @@ export type RunTaskInput = {
     imageName?: string;
     build?: boolean;
     timeout?: number;
-    testCommand?: string;
 };
 
 export type RunTaskDependencies = {
@@ -264,6 +264,8 @@ export async function runTask(
     const repoPath = path.resolve(input.repoPath);
     const taskId = input.taskId ?? randomUUID();
 
+    const validateCommands = await loadValidationCommands(repoPath);
+
     const agentOptions: DockerAgentOptions = {
         repoPath,
         taskId,
@@ -331,7 +333,7 @@ export async function runTask(
             {
                 runAgent: (_worktreePath, prompt) => agent.run(prompt),
                 runTests: () =>
-                    runTests(validationSandbox.runCommand, input.testCommand),
+                    runTests(validationSandbox.runCommand, validateCommands),
                 getChangedFiles,
             },
         );

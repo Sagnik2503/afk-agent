@@ -248,7 +248,7 @@ AFK Agent will:
 4. Create or resume a worktree and branch.
 5. Prepare the versioned Docker image.
 6. Execute OpenCode.
-7. Run tests and retries.
+7. Run Validation and retries.
 8. Commit any leftover changes.
 9. Push the branch.
 10. Open a pull request into the default branch on success; reuse an existing open pull request on re-runs.
@@ -258,18 +258,17 @@ AFK Agent will:
 
 ### Options
 
-| Flag                 | Purpose                                                 |
-| -------------------- | ------------------------------------------------------- |
-| `--model <model>`    | Model used inside the Sandbox.                          |
-| `--timeout <ms>`     | Agent run time limit in milliseconds.                   |
-| `--memory <size>`    | Sandbox memory ceiling, e.g. `2g` (default: `2g`).      |
-| `--cpus <count>`     | Sandbox CPU ceiling (default: `2`).                     |
-| `--pids-limit <n>`   | Sandbox process-count ceiling (default: `512`).         |
-| `--test-command <c>` | Command used to validate changes (default: `npm test`). |
-| `--image <image>`    | Use a supplied Sandbox image instead of building one.   |
-| `--no-push`          | Keep the branch local; also skips the pull request.     |
-| `--no-pr`            | Push the branch but skip the pull request.              |
-| `--background`       | Run in the background and return immediately.           |
+| Flag               | Purpose                                               |
+| ------------------ | ----------------------------------------------------- |
+| `--model <model>`  | Model used inside the Sandbox.                        |
+| `--timeout <ms>`   | Agent run time limit in milliseconds.                 |
+| `--memory <size>`  | Sandbox memory ceiling, e.g. `2g` (default: `2g`).    |
+| `--cpus <count>`   | Sandbox CPU ceiling (default: `2`).                   |
+| `--pids-limit <n>` | Sandbox process-count ceiling (default: `512`).       |
+| `--image <image>`  | Use a supplied Sandbox image instead of building one. |
+| `--no-push`        | Keep the branch local; also skips the pull request.   |
+| `--no-pr`          | Push the branch but skip the pull request.            |
+| `--background`     | Run in the background and return immediately.         |
 
 Every Sandbox starts with a memory, CPU, and process-count ceiling so an
 unattended agent run cannot exhaust the host. The defaults are 2g of memory,
@@ -279,6 +278,31 @@ optional `b`, `k`, `m`, or `g` unit, CPUs accept a positive decimal, and the
 process limit accepts a positive integer. Invalid values are rejected before
 the Sandbox starts. If an Attempt is killed for exceeding a limit, it stops
 without retrying and the report names the limit and the flag to raise.
+
+### Validation
+
+Each repository defines its own Validation as an ordered list of commands in
+`.afk/config.json` under a `validate` key:
+
+```json
+{ "validate": ["npm ci", "npm test", "npm run lint"] }
+```
+
+The commands run in order inside the Sandbox after each Agent run and stop at the
+first failure; the retry prompt names the failed command and carries its output.
+Validation is language-agnostic: tests, type checks, linters, or any
+project-specific check. Because the commands run in a fresh worktree, make each
+one self-sufficient (install dependencies as part of the command, as `npm ci`
+does above).
+
+A missing `.afk/config.json` or a missing `validate` key refuses the run at
+preflight with an actionable error. An empty list is a deliberate opt-out:
+
+```json
+{ "validate": [] }
+```
+
+It runs with no checks and the Run report shows `Validation: none`.
 
 ### Providers and credentials
 

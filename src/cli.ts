@@ -100,7 +100,6 @@ type RunOptions = {
     memory?: string;
     cpus?: string;
     pidsLimit?: string;
-    testCommand?: string;
     image?: string;
     push?: boolean;
     pr?: boolean;
@@ -124,9 +123,6 @@ function backgroundChildArgs(options: RunOptions): string[] {
     }
     if (options.pidsLimit !== undefined) {
         args.push("--pids-limit", options.pidsLimit);
-    }
-    if (options.testCommand !== undefined) {
-        args.push("--test-command", options.testCommand);
     }
     if (options.image !== undefined) {
         args.push("--image", options.image);
@@ -323,10 +319,6 @@ program
         parsePids,
     )
     .option(
-        "--test-command <command>",
-        "Command used to validate changes (default: npm test)",
-    )
-    .option(
         "--image <image>",
         "Use a prebuilt Sandbox image instead of building",
     )
@@ -472,9 +464,6 @@ async function executeRun(
                 ...(options.cpus !== undefined ? { cpus: options.cpus } : {}),
                 ...(options.pidsLimit !== undefined
                     ? { pidsLimit: options.pidsLimit }
-                    : {}),
-                ...(options.testCommand !== undefined
-                    ? { testCommand: options.testCommand }
                     : {}),
                 ...(options.image !== undefined
                     ? { imageName: options.image, build: false }

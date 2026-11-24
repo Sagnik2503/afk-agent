@@ -26,6 +26,8 @@ function makeTestResult(overrides: Partial<TestResult> = {}): TestResult {
         stdout: "",
         stderr: "",
         timedOut: false,
+        commands: ["npm test"],
+        failedCommand: null,
         ...overrides,
     };
 }
@@ -302,5 +304,39 @@ describe("formatRunReport", () => {
         expect(exitCode).toBe(1);
         expect(text).toContain("FAILED");
         expect(text).toContain("docker is not running");
+    });
+
+    it("shows Validation: none for an empty Validation list", () => {
+        const report = buildReport({
+            taskId: "task-1",
+            agentResult: makeAgentResult(),
+            testResult: makeTestResult({ commands: [] }),
+            changedFiles: ["src/a.ts"],
+        });
+
+        const { text, exitCode } = formatRunReport(
+            makeRunResult({ reports: [report] }),
+            { pushEnabled: true, color: plain },
+        );
+
+        expect(exitCode).toBe(0);
+        expect(text).toContain("Validation: none");
+    });
+
+    it("shows the Validation command count when checks are configured", () => {
+        const report = buildReport({
+            taskId: "task-1",
+            agentResult: makeAgentResult(),
+            testResult: makeTestResult({ commands: ["npm ci", "npm test"] }),
+            changedFiles: ["src/a.ts"],
+        });
+
+        const { text } = formatRunReport(makeRunResult({ reports: [report] }), {
+            pushEnabled: true,
+            color: plain,
+        });
+
+        expect(text).toContain("Validation: 2 commands");
+        expect(text).not.toContain("Validation: none");
     });
 });

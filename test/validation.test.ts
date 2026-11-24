@@ -23,21 +23,22 @@ beforeEach(() => {
 });
 
 describe("runTests", () => {
-    it("runs the default test command inside the Sandbox", async () => {
+    it("runs every Validation command in order inside the Sandbox", async () => {
         runCommand.mockResolvedValue(processResult({ stdout: "passed" }));
 
-        const result = await runTests(runCommand);
+        const result = await runTests(runCommand, ["npm ci", "npm test"]);
 
-        expect(runCommand).toHaveBeenCalledWith(["sh", "-c", "npm test"], {
-            timeout: 120_000,
-        });
+        expect(runCommand.mock.calls).toEqual([
+            [["sh", "-c", "npm ci"], { timeout: 120_000 }],
+            [["sh", "-c", "npm test"], { timeout: 120_000 }],
+        ]);
         expect(result.passed).toBe(true);
-        expect(result.stdout).toContain("passed");
-        expect(result.timedOut).toBe(false);
+        expect(result.failedCommand).toBeNull();
+        expect(result.commands).toEqual(["npm ci", "npm test"]);
     });
 
-    it("captures the failure output from the Sandbox", async () => {
-        runCommand.mockResolvedValue(
+    it("stops at the first failing command and labels it with its output", async () => {
+        runCommand.mockResolvedValueOnce(processResult()).mockResolvedValueOnce(
             processResult({
                 exitCode: 1,
                 stdout: "test output",
@@ -45,31 +46,26 @@ describe("runTests", () => {
             }),
         );
 
-        const result = await runTests(runCommand);
+        const result = await runTests(runCommand, [
+            "npm ci",
+            "npm test",
+            "npm run lint",
+        ]);
 
+        expect(runCommand).toHaveBeenCalledTimes(2);
         expect(result.passed).toBe(false);
+        expect(result.failedCommand).toBe("npm test");
         expect(result.stdout).toContain("test output");
         expect(result.stderr).toContain("nope");
     });
 
-    it("runs a custom validation command inside the Sandbox", async () => {
-        runCommand.mockResolvedValue(processResult({ stdout: "custom-check" }));
+    it("runs no checks for an empty Validation list", async () => {
+        const result = await runTests(runCommand, []);
 
-        const result = await runTests(runCommand, "make check");
-
-        expect(runCommand).toHaveBeenCalledWith(["sh", "-c", "make check"], {
-            timeout: 120_000,
-        });
+        expect(runCommand).not.toHaveBeenCalled();
         expect(result.passed).toBe(true);
-        expect(result.stdout).toContain("custom-check");
-    });
-
-    it("fails when the Sandbox command fails", async () => {
-        runCommand.mockResolvedValue(processResult({ exitCode: 2 }));
-
-        const result = await runTests(runCommand, "make check");
-
-        expect(result.passed).toBe(false);
+        expect(result.commands).toEqual([]);
+        expect(result.failedCommand).toBeNull();
     });
 
     it("reports a timed-out command as failed and timed out", async () => {
@@ -77,10 +73,11 @@ describe("runTests", () => {
             processResult({ exitCode: null, timedOut: true }),
         );
 
-        const result = await runTests(runCommand);
+        const result = await runTests(runCommand, ["npm test"]);
 
         expect(result.passed).toBe(false);
         expect(result.timedOut).toBe(true);
+        expect(result.failedCommand).toBe("npm test");
     });
 
     it("fails a timed-out command even when it reports exit 0", async () => {
@@ -88,7 +85,7 @@ describe("runTests", () => {
             processResult({ exitCode: 0, timedOut: true }),
         );
 
-        const result = await runTests(runCommand);
+        const result = await runTests(runCommand, ["npm test"]);
 
         expect(result.passed).toBe(false);
         expect(result.timedOut).toBe(true);
