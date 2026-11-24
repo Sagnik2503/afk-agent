@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadValidationCommands } from "../src/config.js";
+import {
+    loadProjectDockerfile,
+    loadValidationCommands,
+} from "../src/config.js";
 
 const repos: string[] = [];
 
@@ -85,5 +88,53 @@ describe("loadValidationCommands", () => {
         const repo = await makeRepo(JSON.stringify({ validate: [] }));
 
         await expect(loadValidationCommands(repo)).resolves.toEqual([]);
+    });
+});
+
+describe("loadProjectDockerfile", () => {
+    it("returns null when the config has no dockerfile key", async () => {
+        const repo = await makeRepo(JSON.stringify({ validate: [] }));
+
+        await expect(loadProjectDockerfile(repo)).resolves.toBeNull();
+    });
+
+    it("resolves the dockerfile path relative to the repository", async () => {
+        const repo = await makeRepo(
+            JSON.stringify({ validate: [], dockerfile: ".afk/Dockerfile" }),
+        );
+        await writeFile(
+            join(repo, ".afk", "Dockerfile"),
+            "FROM afk-agent:base\n",
+        );
+
+        await expect(loadProjectDockerfile(repo)).resolves.toBe(
+            join(repo, ".afk", "Dockerfile"),
+        );
+    });
+
+    it("refuses a dockerfile value that is not a non-empty string", async () => {
+        const numeric = await makeRepo(
+            JSON.stringify({ validate: [], dockerfile: 42 }),
+        );
+        await expect(loadProjectDockerfile(numeric)).rejects.toThrow(
+            /"dockerfile"/,
+        );
+
+        const empty = await makeRepo(
+            JSON.stringify({ validate: [], dockerfile: "  " }),
+        );
+        await expect(loadProjectDockerfile(empty)).rejects.toThrow(
+            /"dockerfile"/,
+        );
+    });
+
+    it("refuses a dockerfile key that points at a missing file", async () => {
+        const repo = await makeRepo(
+            JSON.stringify({ validate: [], dockerfile: ".afk/Dockerfile" }),
+        );
+
+        await expect(loadProjectDockerfile(repo)).rejects.toThrow(
+            /Dockerfile.*does not exist/s,
+        );
     });
 });

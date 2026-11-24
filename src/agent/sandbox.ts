@@ -1,6 +1,7 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { packageVersion } from "../package_info.js";
 import { taskWorktreePath } from "../worktree/manager.js";
 import {
     ChildProcess,
@@ -8,7 +9,7 @@ import {
     type ResourceLimit,
 } from "../process.js";
 
-export const DEFAULT_IMAGE = `afk-agent:${packageVersion()}`;
+export const DEFAULT_IMAGE = "afk-agent:base";
 export const DEFAULT_DOCKERFILE = fileURLToPath(
     new URL("../../Dockerfile", import.meta.url),
 );
@@ -196,6 +197,18 @@ export async function prepareSandboxImage(
     if (build.timedOut || build.exitCode !== 0) {
         throw new Error(`Docker image build failed: ${build.stderr}`);
     }
+}
+
+export async function projectImageName(
+    dockerfilePath: string,
+): Promise<string> {
+    const content = await readFile(dockerfilePath);
+    const hash = createHash("sha256")
+        .update(content)
+        .digest("hex")
+        .slice(0, 12);
+
+    return `afk-agent:project-${hash}`;
 }
 
 export function createSandboxCommandRunner(

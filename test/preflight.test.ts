@@ -174,6 +174,24 @@ describe("runPreflight", () => {
         ]);
     });
 
+    it("refuses a run when the dockerfile key points at a missing file", async () => {
+        const repoPath = await makeRepo(
+            JSON.stringify({ validate: [], dockerfile: ".afk/Dockerfile" }),
+        );
+
+        const failures = await runPreflight({
+            repoPath,
+            run: passingRun(),
+        });
+
+        expect(failures).toEqual([
+            expect.objectContaining({
+                check: "Validation config",
+                guidance: expect.stringContaining("Dockerfile"),
+            }),
+        ]);
+    });
+
     it("accepts an empty validate list as a deliberate opt-out", async () => {
         const repoPath = await makeRepo(configured);
 

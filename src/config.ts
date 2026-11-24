@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
-export async function loadValidationCommands(
+async function readConfig(
     repoPath: string,
-): Promise<string[]> {
+): Promise<{ config: unknown; configPath: string }> {
     const configPath = path.join(repoPath, ".afk", "config.json");
     let content: string;
 
@@ -24,6 +24,14 @@ export async function loadValidationCommands(
             `Invalid JSON in ${configPath}. Fix the file so it parses, e.g. { "validate": ["npm test"] }.`,
         );
     }
+
+    return { config, configPath };
+}
+
+export async function loadValidationCommands(
+    repoPath: string,
+): Promise<string[]> {
+    const { config, configPath } = await readConfig(repoPath);
 
     if (
         typeof config !== "object" ||
@@ -47,4 +55,38 @@ export async function loadValidationCommands(
     }
 
     return validate;
+}
+
+export async function loadProjectDockerfile(
+    repoPath: string,
+): Promise<string | null> {
+    const { config, configPath } = await readConfig(repoPath);
+
+    if (
+        typeof config !== "object" ||
+        config === null ||
+        !("dockerfile" in config)
+    ) {
+        return null;
+    }
+
+    const dockerfile = config.dockerfile;
+
+    if (typeof dockerfile !== "string" || dockerfile.trim() === "") {
+        throw new Error(
+            `"dockerfile" in ${configPath} must be a non-empty path string, e.g. { "dockerfile": ".afk/Dockerfile" }.`,
+        );
+    }
+
+    const dockerfilePath = path.resolve(repoPath, dockerfile);
+
+    try {
+        await access(dockerfilePath);
+    } catch {
+        throw new Error(
+            `Dockerfile ${dockerfilePath} (from "dockerfile" in ${configPath}) does not exist. Create it extending FROM afk-agent:base, or remove the "dockerfile" key to use the Sandbox image.`,
+        );
+    }
+
+    return dockerfilePath;
 }
