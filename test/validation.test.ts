@@ -1,78 +1,96 @@
-import { describe, it, expect } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ProcessResult } from "../src/process.js";
+import type { SandboxCommandRunner } from "../src/agent/sandbox.js";
 import { runTests } from "../src/harness/validation.js";
 
-async function makeProject(testScript: string): Promise<string> {
-    const directory = await mkdtemp(join(tmpdir(), "afk-agent-validation-"));
-    await writeFile(
-        join(directory, "package.json"),
-        JSON.stringify({ name: "fixture", scripts: { test: testScript } }),
-    );
-    return directory;
+function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
+    return {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        outputTruncated: false,
+        ...overrides,
+    };
 }
 
+const runCommand = vi.fn<SandboxCommandRunner["runCommand"]>();
+
+beforeEach(() => {
+    runCommand.mockReset();
+    runCommand.mockResolvedValue(processResult());
+});
+
 describe("runTests", () => {
-    it("runs the package test script in the worktree", async () => {
-        const directory = await makeProject(
-            "node -e \"console.log('passed')\"",
+    it("runs the default test command inside the Sandbox", async () => {
+        runCommand.mockResolvedValue(processResult({ stdout: "passed" }));
+
+        const result = await runTests(runCommand);
+
+        expect(runCommand).toHaveBeenCalledWith(["sh", "-c", "npm test"], {
+            timeout: 120_000,
+        });
+        expect(result.passed).toBe(true);
+        expect(result.stdout).toContain("passed");
+        expect(result.timedOut).toBe(false);
+    });
+
+    it("captures the failure output from the Sandbox", async () => {
+        runCommand.mockResolvedValue(
+            processResult({
+                exitCode: 1,
+                stdout: "test output",
+                stderr: "nope",
+            }),
         );
 
-        try {
-            const result = await runTests(directory);
+        const result = await runTests(runCommand);
 
-            expect(result.passed).toBe(true);
-            expect(result.stdout).toContain("passed");
-            expect(result.timedOut).toBe(false);
-        } finally {
-            await rm(directory, { recursive: true, force: true });
-        }
+        expect(result.passed).toBe(false);
+        expect(result.stdout).toContain("test output");
+        expect(result.stderr).toContain("nope");
     });
 
-    it("returns the failure details when the tests fail", async () => {
-        const directory = await makeProject(
-            "node -e \"console.error('nope'); process.exit(1)\"",
+    it("runs a custom validation command inside the Sandbox", async () => {
+        runCommand.mockResolvedValue(processResult({ stdout: "custom-check" }));
+
+        const result = await runTests(runCommand, "make check");
+
+        expect(runCommand).toHaveBeenCalledWith(["sh", "-c", "make check"], {
+            timeout: 120_000,
+        });
+        expect(result.passed).toBe(true);
+        expect(result.stdout).toContain("custom-check");
+    });
+
+    it("fails when the Sandbox command fails", async () => {
+        runCommand.mockResolvedValue(processResult({ exitCode: 2 }));
+
+        const result = await runTests(runCommand, "make check");
+
+        expect(result.passed).toBe(false);
+    });
+
+    it("reports a timed-out command as failed and timed out", async () => {
+        runCommand.mockResolvedValue(
+            processResult({ exitCode: null, timedOut: true }),
         );
 
-        try {
-            const result = await runTests(directory);
+        const result = await runTests(runCommand);
 
-            expect(result.passed).toBe(false);
-            expect(result.stderr).toContain("nope");
-        } finally {
-            await rm(directory, { recursive: true, force: true });
-        }
+        expect(result.passed).toBe(false);
+        expect(result.timedOut).toBe(true);
     });
 
-    it("runs a custom test command for a non-npm repository", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "afk-agent-custom-"));
+    it("fails a timed-out command even when it reports exit 0", async () => {
+        runCommand.mockResolvedValue(
+            processResult({ exitCode: 0, timedOut: true }),
+        );
 
-        try {
-            const result = await runTests(
-                directory,
-                "node -e \"console.log('custom-check')\"",
-            );
+        const result = await runTests(runCommand);
 
-            expect(result.passed).toBe(true);
-            expect(result.stdout).toContain("custom-check");
-        } finally {
-            await rm(directory, { recursive: true, force: true });
-        }
-    });
-
-    it("fails when the custom test command fails", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "afk-agent-custom-"));
-
-        try {
-            const result = await runTests(
-                directory,
-                'node -e "process.exit(1)"',
-            );
-
-            expect(result.passed).toBe(false);
-        } finally {
-            await rm(directory, { recursive: true, force: true });
-        }
+        expect(result.passed).toBe(false);
+        expect(result.timedOut).toBe(true);
     });
 });

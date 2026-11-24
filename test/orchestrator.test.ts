@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import type { ProcessResult } from "../src/process.js";
 import type { HarnessReport } from "../src/harness/report.js";
 import { removeWorktree, setupWorktree } from "../src/worktree/manager.js";
 import { createDockerAgent } from "../src/agent/docker_runner.js";
+import {
+    createSandboxCommandRunner,
+    type SandboxCommandRunner,
+} from "../src/agent/sandbox.js";
 import { runWithRetries } from "../src/harness/retry.js";
-import { runTests } from "../src/harness/validation.js";
 import { getChangedFiles } from "../src/harness/change.js";
 import { runTask } from "../src/harness/orchestrator.js";
 import {
@@ -48,6 +50,10 @@ vi.mock("../src/agent/docker_runner.js", () => ({
     createDockerAgent: vi.fn(),
 }));
 
+vi.mock("../src/agent/sandbox.js", () => ({
+    createSandboxCommandRunner: vi.fn(),
+}));
+
 vi.mock("../src/harness/retry.js", () => ({
     runWithRetries: vi.fn(),
 }));
@@ -55,6 +61,7 @@ vi.mock("../src/harness/retry.js", () => ({
 const mockedSetupWorktree = vi.mocked(setupWorktree);
 const mockedRemoveWorktree = vi.mocked(removeWorktree);
 const mockedCreateDockerAgent = vi.mocked(createDockerAgent);
+const mockedCreateSandboxCommandRunner = vi.mocked(createSandboxCommandRunner);
 const mockedRunWithRetries = vi.mocked(runWithRetries);
 const mockedBuildIssueComment = vi.mocked(buildIssueComment);
 const mockedCommitLeftovers = vi.mocked(commitLeftovers);
@@ -81,6 +88,13 @@ function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
 const agent = {
     prepareImage: vi.fn(async () => {}),
     run: vi.fn(async (): Promise<ProcessResult> => processResult()),
+};
+
+const sandboxRunner = {
+    prepareImage: vi.fn(async () => {}),
+    runCommand: vi.fn<SandboxCommandRunner["runCommand"]>(
+        async (): Promise<ProcessResult> => processResult(),
+    ),
 };
 
 const input = {
@@ -132,9 +146,12 @@ beforeEach(() => {
     mockedSetupWorktree.mockReset();
     mockedRemoveWorktree.mockReset();
     mockedCreateDockerAgent.mockReset();
+    mockedCreateSandboxCommandRunner.mockReset();
     mockedRunWithRetries.mockReset();
     agent.prepareImage.mockReset();
     agent.run.mockReset();
+    sandboxRunner.prepareImage.mockReset();
+    sandboxRunner.runCommand.mockReset();
     mockedBuildIssueComment.mockReset();
     mockedCommitLeftovers.mockReset();
     mockedGetBaseRef.mockReset();
@@ -148,6 +165,9 @@ beforeEach(() => {
     agent.prepareImage.mockResolvedValue(undefined);
     agent.run.mockResolvedValue(processResult());
     mockedCreateDockerAgent.mockReturnValue(agent);
+    sandboxRunner.prepareImage.mockResolvedValue(undefined);
+    sandboxRunner.runCommand.mockResolvedValue(processResult());
+    mockedCreateSandboxCommandRunner.mockReturnValue(sandboxRunner);
     mockedSetupWorktree.mockResolvedValue({ branchName, worktreePath });
     mockedRemoveWorktree.mockResolvedValue(undefined);
     mockedRunWithRetries.mockResolvedValue({ reports: [], error: null });
@@ -294,7 +314,7 @@ describe("runTask", () => {
         });
     });
 
-    it("runs retries with the task, worktree, prompt, and host validators", async () => {
+    it("runs retries with the task, worktree, prompt, and sandbox validators", async () => {
         await runTask(input);
 
         expect(mockedRunWithRetries).toHaveBeenCalledWith(
@@ -306,21 +326,40 @@ describe("runTask", () => {
             expect.objectContaining({}),
         );
 
+        expect(mockedCreateSandboxCommandRunner).toHaveBeenCalledWith(
+            mockedCreateDockerAgent.mock.calls[0]?.[0],
+        );
+
         const deps = mockedRunWithRetries.mock.calls[0]?.[1];
 
-        expect(deps?.runTests).toBe(runTests);
         expect(deps?.getChangedFiles).toBe(getChangedFiles);
+
+        const result = await deps?.runTests(worktreePath);
+
+        expect(sandboxRunner.runCommand).toHaveBeenCalledWith(
+            ["sh", "-c", "npm test"],
+            { timeout: 120_000 },
+        );
+        expect(result?.passed).toBe(true);
     });
 
     it("validates with the configured test command", async () => {
+        sandboxRunner.runCommand.mockResolvedValue(
+            processResult({ stdout: "custom-check" }),
+        );
+
         await runTask({
             ...input,
             testCommand: "node -e \"console.log('custom-check')\"",
         });
 
         const deps = mockedRunWithRetries.mock.calls[0]?.[1];
-        const result = await deps?.runTests(tmpdir());
+        const result = await deps?.runTests(worktreePath);
 
+        expect(sandboxRunner.runCommand).toHaveBeenCalledWith(
+            ["sh", "-c", "node -e \"console.log('custom-check')\""],
+            { timeout: 120_000 },
+        );
         expect(result?.passed).toBe(true);
         expect(result?.stdout).toContain("custom-check");
     });
