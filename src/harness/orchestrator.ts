@@ -4,7 +4,11 @@ import {
     createDockerAgent,
     type DockerAgentOptions,
 } from "../agent/docker_runner.js";
-import { createSandboxCommandRunner } from "../agent/sandbox.js";
+import {
+    createSandboxCommandRunner,
+    prepareSandboxImage,
+    projectImageName,
+} from "../agent/sandbox.js";
 import { setupWorktree } from "../worktree/manager.js";
 import {
     buildIssueComment,
@@ -29,7 +33,7 @@ import { errorMessage } from "../errors.js";
 import type { HarnessReport } from "./report.js";
 import { runWithRetries } from "./retry.js";
 import { runTests } from "./validation.js";
-import { loadValidationCommands } from "../config.js";
+import { loadProjectDockerfile, loadValidationCommands } from "../config.js";
 
 export type RunPhase = "image" | "sandbox";
 
@@ -265,6 +269,10 @@ export async function runTask(
     const taskId = input.taskId ?? randomUUID();
 
     const validateCommands = await loadValidationCommands(repoPath);
+    const projectImage =
+        input.imageName === undefined
+            ? await loadProjectDockerfile(repoPath)
+            : null;
 
     const agentOptions: DockerAgentOptions = {
         repoPath,
@@ -292,6 +300,10 @@ export async function runTask(
     if (input.timeout !== undefined) {
         agentOptions.timeout = input.timeout;
     }
+    if (projectImage !== null) {
+        agentOptions.imageName = await projectImageName(projectImage);
+        agentOptions.dockerfilePath = projectImage;
+    }
 
     const agent = createDockerAgent(agentOptions);
     const validationSandbox = createSandboxCommandRunner(agentOptions);
@@ -300,6 +312,9 @@ export async function runTask(
 
     try {
         await input.onPhase?.("image");
+        if (projectImage !== null) {
+            await prepareSandboxImage();
+        }
         await agent.prepareImage();
     } catch (error) {
         await disposeAfterFailure(

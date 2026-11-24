@@ -4,7 +4,7 @@ import {
     type ProcessOptions,
     type ProcessResult,
 } from "./process.js";
-import { loadValidationCommands } from "./config.js";
+import { loadProjectDockerfile, loadValidationCommands } from "./config.js";
 import { errorMessage } from "./errors.js";
 
 export type PreflightRun = (
@@ -81,6 +81,7 @@ export async function runPreflight(
 
     try {
         await loadValidationCommands(repoPath);
+        await loadProjectDockerfile(repoPath);
     } catch (error) {
         failures.push({
             check: "Validation config",

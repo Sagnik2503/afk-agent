@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ProcessResult } from "../src/process.js";
 import { ChildProcess } from "../src/process.js";
 import {
@@ -7,6 +10,7 @@ import {
     DEFAULT_IMAGE,
     DEFAULT_MEMORY,
     DEFAULT_PIDS_LIMIT,
+    projectImageName,
 } from "../src/agent/sandbox.js";
 
 vi.mock("../src/process.js", () => ({
@@ -216,5 +220,46 @@ describe("createSandboxCommandRunner", () => {
             timeout: 120_000,
             env: {},
         });
+    });
+});
+
+describe("projectImageName", () => {
+    const dirs: string[] = [];
+
+    async function makeDockerfile(content: string): Promise<string> {
+        const dir = await mkdtemp(join(tmpdir(), "afk-project-"));
+        dirs.push(dir);
+        const file = join(dir, "Dockerfile");
+        await writeFile(file, content);
+        return file;
+    }
+
+    afterEach(async () => {
+        await Promise.all(
+            dirs
+                .splice(0)
+                .map((dir) => rm(dir, { recursive: true, force: true })),
+        );
+    });
+
+    it("tags the Project image with a hash of the Dockerfile content", async () => {
+        const file = await makeDockerfile("FROM afk-agent:base\n");
+
+        await expect(projectImageName(file)).resolves.toBe(
+            "afk-agent:project-f9e16c444785",
+        );
+    });
+
+    it("reuses the tag for unchanged content and rebuilds when it changes", async () => {
+        const file = await makeDockerfile("FROM afk-agent:base\n");
+        const first = await projectImageName(file);
+
+        await writeFile(file, "FROM afk-agent:base\n");
+        await expect(projectImageName(file)).resolves.toBe(first);
+
+        await writeFile(file, "FROM afk-agent:base\nRUN echo hi\n");
+        await expect(projectImageName(file)).resolves.toBe(
+            "afk-agent:project-19c058f3dfa0",
+        );
     });
 });

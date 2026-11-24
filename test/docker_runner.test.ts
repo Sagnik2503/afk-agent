@@ -14,7 +14,6 @@ import {
     parsePidsLimit,
     watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
-import { packageVersion } from "../src/package_info.js";
 
 vi.mock("../src/process.js", () => ({
     ChildProcess: vi.fn(),
@@ -46,8 +45,8 @@ beforeEach(() => {
 });
 
 describe("createDockerAgent", () => {
-    it("tags the default image with the CLI version", () => {
-        expect(DEFAULT_IMAGE).toBe(`afk-agent:${packageVersion()}`);
+    it("tags the default Sandbox image with the stable base tag", () => {
+        expect(DEFAULT_IMAGE).toBe("afk-agent:base");
     });
 
     it("rejects an invalid task id before running Docker", () => {
