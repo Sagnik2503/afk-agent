@@ -1,4 +1,4 @@
-import { ChildProcess } from "../process.js";
+import type { SandboxCommandRunner } from "../agent/sandbox.js";
 
 export type TestResult = {
     passed: boolean;
@@ -8,11 +8,10 @@ export type TestResult = {
 };
 
 export async function runTests(
-    worktreePath: string,
+    runCommand: SandboxCommandRunner["runCommand"],
     command = "npm test",
 ): Promise<TestResult> {
-    const result = await ChildProcess("sh", ["-c", command], {
-        cwd: worktreePath,
+    const result = await runCommand(["sh", "-c", command], {
         timeout: 120_000,
     });
 

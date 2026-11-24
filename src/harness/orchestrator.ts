@@ -4,6 +4,7 @@ import {
     createDockerAgent,
     type DockerAgentOptions,
 } from "../agent/docker_runner.js";
+import { createSandboxCommandRunner } from "../agent/sandbox.js";
 import { setupWorktree } from "../worktree/manager.js";
 import {
     buildIssueComment,
@@ -291,6 +292,7 @@ export async function runTask(
     }
 
     const agent = createDockerAgent(agentOptions);
+    const validationSandbox = createSandboxCommandRunner(agentOptions);
 
     const { branchName, worktreePath } = await setupWorktree(repoPath, taskId);
 
@@ -328,11 +330,8 @@ export async function runTask(
             },
             {
                 runAgent: (_worktreePath, prompt) => agent.run(prompt),
-                runTests:
-                    input.testCommand === undefined
-                        ? runTests
-                        : (worktreePath: string) =>
-                              runTests(worktreePath, input.testCommand),
+                runTests: () =>
+                    runTests(validationSandbox.runCommand, input.testCommand),
                 getChangedFiles,
             },
         );
