@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ProcessResult } from "../src/process.js";
 import {
     formatPreflightFailures,
@@ -25,13 +28,36 @@ function passingRun(): PreflightRun {
     return vi.fn(async () => result());
 }
 
+const repos: string[] = [];
+
+async function makeRepo(config?: string): Promise<string> {
+    const repo = await mkdtemp(join(tmpdir(), "afk-preflight-"));
+    repos.push(repo);
+
+    if (config !== undefined) {
+        await mkdir(join(repo, ".afk"), { recursive: true });
+        await writeFile(join(repo, ".afk", "config.json"), config);
+    }
+
+    return repo;
+}
+
+const configured = '{"validate":[]}';
+
+afterEach(async () => {
+    await Promise.all(
+        repos
+            .splice(0)
+            .map((repo) => rm(repo, { recursive: true, force: true })),
+    );
+});
+
 describe("runPreflight", () => {
     it("returns no failures when every check passes", async () => {
+        const repoPath = await makeRepo(configured);
         const run = passingRun();
 
-        await expect(runPreflight({ repoPath: "/repo", run })).resolves.toEqual(
-            [],
-        );
+        await expect(runPreflight({ repoPath, run })).resolves.toEqual([]);
 
         expect(run).toHaveBeenCalledWith("git", ["--version"], {
             timeout: 10_000,
@@ -45,11 +71,12 @@ describe("runPreflight", () => {
         expect(run).toHaveBeenCalledWith(
             "git",
             ["rev-parse", "--show-toplevel"],
-            { cwd: "/repo", timeout: 10_000 },
+            { cwd: repoPath, timeout: 10_000 },
         );
     });
 
     it("reports Git when it cannot be run", async () => {
+        const repoPath = await makeRepo(configured);
         const run: PreflightRun = vi.fn(async (command) => {
             if (command === "git") {
                 throw new Error("spawn git ENOENT");
@@ -57,17 +84,18 @@ describe("runPreflight", () => {
             return result();
         });
 
-        const failures = await runPreflight({ repoPath: "/repo", run });
+        const failures = await runPreflight({ repoPath, run });
 
         expect(failures.map((failure) => failure.check)).toContain("Git");
     });
 
     it("reports the Docker daemon when it is not running", async () => {
+        const repoPath = await makeRepo(configured);
         const run: PreflightRun = vi.fn(async (command) =>
             command === "docker" ? result(1) : result(),
         );
 
-        const failures = await runPreflight({ repoPath: "/repo", run });
+        const failures = await runPreflight({ repoPath, run });
 
         expect(failures).toEqual([
             expect.objectContaining({ check: "Docker daemon" }),
@@ -75,11 +103,12 @@ describe("runPreflight", () => {
     });
 
     it("reports the GitHub CLI when it is not authenticated", async () => {
+        const repoPath = await makeRepo(configured);
         const run: PreflightRun = vi.fn(async (command) =>
             command === "gh" ? result(1) : result(),
         );
 
-        const failures = await runPreflight({ repoPath: "/repo", run });
+        const failures = await runPreflight({ repoPath, run });
 
         expect(failures).toEqual([
             expect.objectContaining({ check: "GitHub CLI" }),
@@ -87,11 +116,12 @@ describe("runPreflight", () => {
     });
 
     it("reports a path that is not a Git repository", async () => {
+        const repoPath = await makeRepo(configured);
         const run: PreflightRun = vi.fn(async (_command, args) =>
             args[0] === "rev-parse" ? result(128) : result(),
         );
 
-        const failures = await runPreflight({ repoPath: "/repo", run });
+        const failures = await runPreflight({ repoPath, run });
 
         expect(failures).toEqual([
             expect.objectContaining({ check: "Git repository" }),
@@ -99,9 +129,10 @@ describe("runPreflight", () => {
     });
 
     it("reports every failed check at once", async () => {
+        const repoPath = await makeRepo(configured);
         const run: PreflightRun = vi.fn(async () => result(1));
 
-        const failures = await runPreflight({ repoPath: "/repo", run });
+        const failures = await runPreflight({ repoPath, run });
 
         expect(failures.map((failure) => failure.check)).toEqual([
             "Git",
@@ -109,6 +140,46 @@ describe("runPreflight", () => {
             "GitHub CLI",
             "Git repository",
         ]);
+    });
+
+    it("refuses a run when the config file is missing", async () => {
+        const repoPath = await makeRepo();
+
+        const failures = await runPreflight({
+            repoPath,
+            run: passingRun(),
+        });
+
+        expect(failures).toEqual([
+            expect.objectContaining({
+                check: "Validation config",
+                guidance: expect.stringContaining("validate"),
+            }),
+        ]);
+    });
+
+    it("refuses a run when the validate key is missing", async () => {
+        const repoPath = await makeRepo(JSON.stringify({ model: "x" }));
+
+        const failures = await runPreflight({
+            repoPath,
+            run: passingRun(),
+        });
+
+        expect(failures).toEqual([
+            expect.objectContaining({
+                check: "Validation config",
+                guidance: expect.stringContaining("validate"),
+            }),
+        ]);
+    });
+
+    it("accepts an empty validate list as a deliberate opt-out", async () => {
+        const repoPath = await makeRepo(configured);
+
+        await expect(
+            runPreflight({ repoPath, run: passingRun() }),
+        ).resolves.toEqual([]);
     });
 
     it("includes actionable guidance in the formatted report", () => {

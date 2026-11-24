@@ -10,6 +10,7 @@ import {
 } from "../src/agent/sandbox.js";
 import { runWithRetries } from "../src/harness/retry.js";
 import { getChangedFiles } from "../src/harness/change.js";
+import { loadValidationCommands } from "../src/config.js";
 import { runTask } from "../src/harness/orchestrator.js";
 import {
     buildIssueComment,
@@ -54,6 +55,10 @@ vi.mock("../src/agent/sandbox.js", () => ({
     createSandboxCommandRunner: vi.fn(),
 }));
 
+vi.mock("../src/config.js", () => ({
+    loadValidationCommands: vi.fn(),
+}));
+
 vi.mock("../src/harness/retry.js", () => ({
     runWithRetries: vi.fn(),
 }));
@@ -62,6 +67,7 @@ const mockedSetupWorktree = vi.mocked(setupWorktree);
 const mockedRemoveWorktree = vi.mocked(removeWorktree);
 const mockedCreateDockerAgent = vi.mocked(createDockerAgent);
 const mockedCreateSandboxCommandRunner = vi.mocked(createSandboxCommandRunner);
+const mockedLoadValidationCommands = vi.mocked(loadValidationCommands);
 const mockedRunWithRetries = vi.mocked(runWithRetries);
 const mockedBuildIssueComment = vi.mocked(buildIssueComment);
 const mockedCommitLeftovers = vi.mocked(commitLeftovers);
@@ -137,6 +143,8 @@ function report(overrides: Partial<HarnessReport> = {}): HarnessReport {
             stdout: "",
             stderr: "",
             timedOut: false,
+            commands: ["npm test"],
+            failedCommand: null,
         },
         ...overrides,
     };
@@ -147,6 +155,7 @@ beforeEach(() => {
     mockedRemoveWorktree.mockReset();
     mockedCreateDockerAgent.mockReset();
     mockedCreateSandboxCommandRunner.mockReset();
+    mockedLoadValidationCommands.mockReset();
     mockedRunWithRetries.mockReset();
     agent.prepareImage.mockReset();
     agent.run.mockReset();
@@ -168,6 +177,7 @@ beforeEach(() => {
     sandboxRunner.prepareImage.mockResolvedValue(undefined);
     sandboxRunner.runCommand.mockResolvedValue(processResult());
     mockedCreateSandboxCommandRunner.mockReturnValue(sandboxRunner);
+    mockedLoadValidationCommands.mockResolvedValue(["npm test"]);
     mockedSetupWorktree.mockResolvedValue({ branchName, worktreePath });
     mockedRemoveWorktree.mockResolvedValue(undefined);
     mockedRunWithRetries.mockResolvedValue({ reports: [], error: null });
@@ -343,25 +353,36 @@ describe("runTask", () => {
         expect(result?.passed).toBe(true);
     });
 
-    it("validates with the configured test command", async () => {
+    it("validates with the commands from the repository config", async () => {
+        mockedLoadValidationCommands.mockResolvedValue(["make check"]);
         sandboxRunner.runCommand.mockResolvedValue(
             processResult({ stdout: "custom-check" }),
         );
 
-        await runTask({
-            ...input,
-            testCommand: "node -e \"console.log('custom-check')\"",
-        });
+        await runTask(input);
 
+        expect(mockedLoadValidationCommands).toHaveBeenCalledWith("/repo");
         const deps = mockedRunWithRetries.mock.calls[0]?.[1];
         const result = await deps?.runTests(worktreePath);
 
         expect(sandboxRunner.runCommand).toHaveBeenCalledWith(
-            ["sh", "-c", "node -e \"console.log('custom-check')\""],
+            ["sh", "-c", "make check"],
             { timeout: 120_000 },
         );
         expect(result?.passed).toBe(true);
         expect(result?.stdout).toContain("custom-check");
+    });
+
+    it("refuses the run before Docker or the worktree when config is missing", async () => {
+        mockedLoadValidationCommands.mockRejectedValue(
+            new Error('Missing /repo/.afk/config.json. Add a "validate" list.'),
+        );
+
+        await expect(runTask(input)).rejects.toThrow("validate");
+
+        expect(mockedCreateDockerAgent).not.toHaveBeenCalled();
+        expect(mockedSetupWorktree).not.toHaveBeenCalled();
+        expect(mockedRunWithRetries).not.toHaveBeenCalled();
     });
 
     it("binds the agent to its own worktree, ignoring the retry path", async () => {

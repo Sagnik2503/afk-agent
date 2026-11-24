@@ -74,6 +74,27 @@ describe("afk command overview", () => {
         expect(stdout).toContain("--timeout");
     });
 
+    it("no longer offers the removed --test-command flag", async () => {
+        const { stdout } = await runCli(["help", "run"]);
+
+        expect(stdout).not.toContain("--test-command");
+    });
+
+    it("rejects --test-command as an unknown option", async () => {
+        const { code, stderr } = await runCli([
+            "run",
+            "--repo",
+            ".",
+            "--issue",
+            "5",
+            "--test-command",
+            "npm test",
+        ]);
+
+        expect(code).not.toBe(0);
+        expect(stderr).toContain("--test-command");
+    });
+
     it("prints the package version for `afk --version`", async () => {
         const { code, stdout } = await runCli(["--version"]);
 

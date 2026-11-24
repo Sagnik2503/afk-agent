@@ -78,6 +78,14 @@ export function formatRunReport(
     lines.push(`  Attempts:      ${result.reports.length}`);
     if (lastReport) {
         lines.push(`  Changed files: ${lastReport.changedFiles.length}`);
+        const validationCount = lastReport.tests.commands.length;
+        lines.push(
+            `  Validation: ${
+                validationCount === 0
+                    ? "none"
+                    : `${validationCount} command${validationCount === 1 ? "" : "s"}`
+            }`,
+        );
         lines.push("  Reasons:");
         if (lastReport.reasons.length === 0) {
             lines.push("    none");

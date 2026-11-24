@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
     access,
     copyFile,
+    mkdir,
     mkdtemp,
     realpath,
     rm,
@@ -63,6 +64,12 @@ describe.skipIf(!dockerReady)("runTask integration", () => {
             }),
         );
         await writeFile(join(repo, "test.js"), failOnceTest);
+
+        await mkdir(join(repo, ".afk"), { recursive: true });
+        await writeFile(
+            join(repo, ".afk", "config.json"),
+            JSON.stringify({ validate: ["npm test"] }),
+        );
 
         await ChildProcess("git", ["init", "-q"], { cwd: repo });
         await ChildProcess("git", ["add", "."], { cwd: repo });

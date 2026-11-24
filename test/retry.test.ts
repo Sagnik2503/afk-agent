@@ -21,6 +21,8 @@ function testResult(overrides: Partial<TestResult> = {}): TestResult {
         stdout: "",
         stderr: "",
         timedOut: false,
+        commands: ["npm test"],
+        failedCommand: null,
         ...overrides,
     };
 }
@@ -219,5 +221,28 @@ describe("runWithRetries", () => {
         expect(retryPrompt).toContain("stdout-1");
         expect(retryPrompt).toContain("stderr-1");
         expect(retryPrompt).toContain("- src/a.ts");
+    });
+
+    it("labels the failed Validation command in the retry prompt", async () => {
+        const deps = makeDeps();
+        deps.runTests
+            .mockResolvedValueOnce(
+                testResult({
+                    passed: false,
+                    commands: ["npm ci", "npm run lint"],
+                    failedCommand: "npm run lint",
+                    stdout: "lint stdout",
+                    stderr: "lint stderr",
+                }),
+            )
+            .mockResolvedValueOnce(testResult());
+
+        await runWithRetries(input, deps);
+
+        const retryPrompt = deps.runAgent.mock.calls[1]?.[1];
+
+        expect(retryPrompt).toContain("npm run lint");
+        expect(retryPrompt).toContain("lint stdout");
+        expect(retryPrompt).toContain("lint stderr");
     });
 });
