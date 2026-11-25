@@ -191,7 +191,7 @@ afk setup
 daemon, GitHub CLI authentication, and that the target path is a Git repository.
 The path defaults to the current directory; pass one (`afk setup path/to/repo`)
 to check a different clone. It reports every failure at once with what to do
-next, then builds the Sandbox image for the installed CLI version. It writes no
+next, then builds the Sandbox image (`afk-agent:base`). It writes no
 configuration and is safe to run again.
 
 To try it without a global install:
@@ -206,8 +206,15 @@ npx afk-agent --help
 npm install -g afk-agent@latest
 ```
 
-The Sandbox image is tagged with the CLI version, so upgrading the CLI builds a
-fresh image on the next run instead of reusing the old agent.
+The Sandbox image lives under the stable, floating tag `afk-agent:base` so
+project Dockerfiles can extend it without pinning a version. afk reuses the
+cached image while it exists. After upgrading the CLI, refresh the base image
+once so the new agent runtime is picked up:
+
+```bash
+docker rmi afk-agent:base
+afk setup
+```
 
 ### Commands
 
@@ -234,8 +241,8 @@ that contains the issue; the existing push and Pull request safety checks compar
 the two and refuse to push when they differ.
 
 `afk run` performs the same preflight checks as `afk setup` and builds the
-versioned Sandbox image if it is missing, so `afk setup` is a convenience rather
-than a hard gate.
+Sandbox image (or the repository's Project image) if it is missing, so
+`afk setup` is a convenience rather than a hard gate.
 
 A per-task lock refuses overlapping runs: starting the same issue again while a
 run is active fails with the PID of the run holding the lock.
@@ -246,9 +253,9 @@ AFK Agent will:
 2. Fetch the GitHub issue.
 3. Derive a stable task ID from the issue.
 4. Create or resume a worktree and branch.
-5. Prepare the versioned Docker image.
+5. Prepare the Docker image (Sandbox image, or Project image when defined).
 6. Execute OpenCode.
-7. Run tests and retries.
+7. Run Validation and retries.
 8. Commit any leftover changes.
 9. Push the branch.
 10. Open a pull request into the default branch on success; reuse an existing open pull request on re-runs.
@@ -258,18 +265,17 @@ AFK Agent will:
 
 ### Options
 
-| Flag                 | Purpose                                                 |
-| -------------------- | ------------------------------------------------------- |
-| `--model <model>`    | Model used inside the Sandbox.                          |
-| `--timeout <ms>`     | Agent run time limit in milliseconds.                   |
-| `--memory <size>`    | Sandbox memory ceiling, e.g. `2g` (default: `2g`).      |
-| `--cpus <count>`     | Sandbox CPU ceiling (default: `2`).                     |
-| `--pids-limit <n>`   | Sandbox process-count ceiling (default: `512`).         |
-| `--test-command <c>` | Command used to validate changes (default: `npm test`). |
-| `--image <image>`    | Use a supplied Sandbox image instead of building one.   |
-| `--no-push`          | Keep the branch local; also skips the pull request.     |
-| `--no-pr`            | Push the branch but skip the pull request.              |
-| `--background`       | Run in the background and return immediately.           |
+| Flag               | Purpose                                                                |
+| ------------------ | ---------------------------------------------------------------------- |
+| `--model <model>`  | Model used inside the Sandbox.                                         |
+| `--timeout <ms>`   | Agent run time limit in milliseconds.                                  |
+| `--memory <size>`  | Sandbox memory ceiling, e.g. `2g` (default: `2g`).                     |
+| `--cpus <count>`   | Sandbox CPU ceiling (default: `2`).                                    |
+| `--pids-limit <n>` | Sandbox process-count ceiling (default: `512`).                        |
+| `--image <image>`  | Use a supplied image instead of building the Sandbox or Project image. |
+| `--no-push`        | Keep the branch local; also skips the pull request.                    |
+| `--no-pr`          | Push the branch but skip the pull request.                             |
+| `--background`     | Run in the background and return immediately.                          |
 
 Every Sandbox starts with a memory, CPU, and process-count ceiling so an
 unattended agent run cannot exhaust the host. The defaults are 2g of memory,
@@ -279,6 +285,110 @@ optional `b`, `k`, `m`, or `g` unit, CPUs accept a positive decimal, and the
 process limit accepts a positive integer. Invalid values are rejected before
 the Sandbox starts. If an Attempt is killed for exceeding a limit, it stops
 without retrying and the report names the limit and the flag to raise.
+
+### Validation
+
+Each repository defines its own Validation as an ordered list of commands in
+`.afk/config.json` under a `validate` key:
+
+```json
+{ "validate": ["npm ci", "npm test", "npm run lint"] }
+```
+
+The commands run in order inside the Sandbox after each Agent run and stop at the
+first failure; the retry prompt names the failed command and carries its output.
+Validation is language-agnostic: tests, type checks, linters, or any
+project-specific check. Because the commands run in a fresh worktree, make each
+one self-sufficient (install dependencies as part of the command, as `npm ci`
+does above).
+
+A missing `.afk/config.json` or a missing `validate` key refuses the run at
+preflight with an actionable error. An empty list is a deliberate opt-out:
+
+```json
+{ "validate": [] }
+```
+
+It runs with no checks and the Run report shows `Validation: none`.
+
+### Project images
+
+The Sandbox image ships the agent runtime (Node, Git, OpenCode) and assumes
+nothing about your repository's language. A repository that needs another
+toolchain defines a **Project image**: a Dockerfile extending the Sandbox image,
+referenced by an optional `dockerfile` key in `.afk/config.json`:
+
+```json
+{ "dockerfile": ".afk/Dockerfile", "validate": ["cargo test"] }
+```
+
+The path is relative to the repository root. The Dockerfile must start
+`FROM afk-agent:base` — the stable tag afk maintains for the Sandbox image — so
+you never pin a version. afk builds the Project image from it and uses it for
+**both** the Agent run and Validation. The image is tagged with a hash of the
+Dockerfile content (`afk-agent:project-<hash>`): an unchanged file reuses the
+cached image, and editing the file triggers a rebuild. A repository without a
+`dockerfile` key keeps using the Sandbox image unchanged.
+
+Copy-paste templates (save as `.afk/Dockerfile`):
+
+**Python**
+
+```dockerfile
+FROM afk-agent:base
+USER root
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+USER node
+```
+
+```json
+{
+    "dockerfile": ".afk/Dockerfile",
+    "validate": [
+        "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
+        ".venv/bin/python -m pytest"
+    ]
+}
+```
+
+**Rust**
+
+```dockerfile
+FROM afk-agent:base
+USER root
+RUN apt-get update && \
+    apt-get install -y curl build-essential && \
+    rm -rf /var/lib/apt/lists/*
+USER node
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/home/node/.cargo/bin:${PATH}"
+```
+
+```json
+{ "dockerfile": ".afk/Dockerfile", "validate": ["cargo test"] }
+```
+
+**Go**
+
+```dockerfile
+FROM afk-agent:base
+USER root
+RUN apt-get update && \
+    apt-get install -y golang-go && \
+    rm -rf /var/lib/apt/lists/*
+USER node
+```
+
+```json
+{ "dockerfile": ".afk/Dockerfile", "validate": ["go test ./..."] }
+```
+
+The Go template uses Debian's packaged Go; install a newer toolchain from
+[go.dev](https://go.dev/dl/) if your project needs one. Each validate command
+runs in a fresh worktree, so make it self-sufficient (install dependencies as
+part of the command, as the Python example does).
 
 ### Providers and credentials
 

@@ -4,6 +4,8 @@ import {
     type ProcessOptions,
     type ProcessResult,
 } from "./process.js";
+import { loadConfig } from "./config.js";
+import { errorMessage } from "./errors.js";
 
 export type PreflightRun = (
     command: string,
@@ -19,6 +21,7 @@ export type PreflightFailure = {
 export type PreflightInput = {
     repoPath: string;
     run?: PreflightRun;
+    requireValidationConfig?: boolean;
 };
 
 async function passes(
@@ -75,6 +78,17 @@ export async function runPreflight(
             check: "Git repository",
             guidance: `Point afk at a Git repository (checked ${repoPath}).`,
         });
+    }
+
+    if (input.requireValidationConfig ?? true) {
+        try {
+            await loadConfig(repoPath);
+        } catch (error) {
+            failures.push({
+                check: "Validation config",
+                guidance: errorMessage(error),
+            });
+        }
     }
 
     return failures;

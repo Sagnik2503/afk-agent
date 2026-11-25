@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ProcessResult } from "../src/process.js";
-import type { TestResult } from "../src/harness/validation.js";
+import type { ValidationResult } from "../src/harness/validation.js";
 import { buildReport } from "../src/harness/report.js";
 import type { RunTaskResult } from "../src/harness/orchestrator.js";
 import { createColors } from "../src/ui/color.js";
@@ -20,12 +20,16 @@ function makeAgentResult(
     };
 }
 
-function makeTestResult(overrides: Partial<TestResult> = {}): TestResult {
+function makeValidationResult(
+    overrides: Partial<ValidationResult> = {},
+): ValidationResult {
     return {
         passed: true,
         stdout: "",
         stderr: "",
         timedOut: false,
+        commands: ["npm test"],
+        failedCommand: null,
         ...overrides,
     };
 }
@@ -35,7 +39,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult(),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -50,7 +54,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult({ timedOut: true, signal: "SIGTERM" }),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -64,7 +68,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult({ exitCode: 2 }),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -85,7 +89,7 @@ describe("buildReport", () => {
                         "sandbox exceeded its memory limit (2g); raise --memory to allow more",
                 },
             }),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -111,7 +115,7 @@ describe("buildReport", () => {
                         "sandbox exceeded its memory limit (2g); raise --memory to allow more",
                 },
             }),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -126,7 +130,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult({ exitCode: null, signal: "SIGKILL" }),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -138,7 +142,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult(),
-            testResult: makeTestResult({ passed: false, stderr: "boom" }),
+            testResult: makeValidationResult({ passed: false, stderr: "boom" }),
             changedFiles: ["src/a.ts"],
         });
 
@@ -151,7 +155,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult(),
-            testResult: makeTestResult({ passed: false, timedOut: true }),
+            testResult: makeValidationResult({ passed: false, timedOut: true }),
             changedFiles: ["src/a.ts"],
         });
 
@@ -163,7 +167,7 @@ describe("buildReport", () => {
         const report = buildReport({
             taskId: "task-1",
             agentResult: makeAgentResult(),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: [],
         });
 
@@ -182,7 +186,7 @@ function makeRunResult(overrides: Partial<RunTaskResult> = {}): RunTaskResult {
             buildReport({
                 taskId: "task-1",
                 agentResult: makeAgentResult(),
-                testResult: makeTestResult(),
+                testResult: makeValidationResult(),
                 changedFiles: ["src/a.ts"],
             }),
         ],
@@ -232,7 +236,7 @@ describe("formatRunReport", () => {
                         "sandbox exceeded its memory limit (2g); raise --memory to allow more",
                 },
             }),
-            testResult: makeTestResult(),
+            testResult: makeValidationResult(),
             changedFiles: ["src/a.ts"],
         });
 
@@ -302,5 +306,41 @@ describe("formatRunReport", () => {
         expect(exitCode).toBe(1);
         expect(text).toContain("FAILED");
         expect(text).toContain("docker is not running");
+    });
+
+    it("shows Validation: none for an empty Validation list", () => {
+        const report = buildReport({
+            taskId: "task-1",
+            agentResult: makeAgentResult(),
+            testResult: makeValidationResult({ commands: [] }),
+            changedFiles: ["src/a.ts"],
+        });
+
+        const { text, exitCode } = formatRunReport(
+            makeRunResult({ reports: [report] }),
+            { pushEnabled: true, color: plain },
+        );
+
+        expect(exitCode).toBe(0);
+        expect(text).toContain("Validation: none");
+    });
+
+    it("shows the Validation command count when checks are configured", () => {
+        const report = buildReport({
+            taskId: "task-1",
+            agentResult: makeAgentResult(),
+            testResult: makeValidationResult({
+                commands: ["npm ci", "npm test"],
+            }),
+            changedFiles: ["src/a.ts"],
+        });
+
+        const { text } = formatRunReport(makeRunResult({ reports: [report] }), {
+            pushEnabled: true,
+            color: plain,
+        });
+
+        expect(text).toContain("Validation: 2 commands");
+        expect(text).not.toContain("Validation: none");
     });
 });

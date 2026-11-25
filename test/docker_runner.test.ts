@@ -14,7 +14,11 @@ import {
     parsePidsLimit,
     watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
-import { packageVersion } from "../src/package_info.js";
+import {
+    BASE_IMAGE_LABEL,
+    dockerfileHash,
+    sandboxRunUser,
+} from "../src/agent/sandbox.js";
 
 vi.mock("../src/process.js", () => ({
     ChildProcess: vi.fn(),
@@ -46,8 +50,8 @@ beforeEach(() => {
 });
 
 describe("createDockerAgent", () => {
-    it("tags the default image with the CLI version", () => {
-        expect(DEFAULT_IMAGE).toBe(`afk-agent:${packageVersion()}`);
+    it("tags the default Sandbox image with the stable base tag", () => {
+        expect(DEFAULT_IMAGE).toBe("afk-agent:base");
     });
 
     it("rejects an invalid task id before running Docker", () => {
@@ -92,7 +96,14 @@ describe("createDockerAgent", () => {
         );
     });
 
-    it("skips the build when the image already exists", async () => {
+    it("skips the build when the image already exists with the current base hash", async () => {
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
+        mockedChildProcess.mockResolvedValueOnce(
+            result({
+                stdout: JSON.stringify({ [BASE_IMAGE_LABEL]: hash }),
+            }),
+        );
+
         const agent = createDockerAgent(options);
 
         await agent.prepareImage();
@@ -100,7 +111,13 @@ describe("createDockerAgent", () => {
         expect(mockedChildProcess).toHaveBeenCalledTimes(1);
         expect(mockedChildProcess).toHaveBeenCalledWith(
             "docker",
-            ["image", "inspect", DEFAULT_IMAGE],
+            [
+                "image",
+                "inspect",
+                "--format",
+                "{{json .Config.Labels}}",
+                DEFAULT_IMAGE,
+            ],
             expect.anything(),
         );
     });
@@ -113,6 +130,7 @@ describe("createDockerAgent", () => {
             .mockResolvedValueOnce(result());
 
         const agent = createDockerAgent(options);
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
 
         await agent.prepareImage();
 
@@ -125,6 +143,41 @@ describe("createDockerAgent", () => {
                 DEFAULT_IMAGE,
                 "-f",
                 DEFAULT_DOCKERFILE,
+                "--label",
+                `${BASE_IMAGE_LABEL}=${hash}`,
+                path.dirname(DEFAULT_DOCKERFILE),
+            ],
+            expect.anything(),
+        );
+    });
+
+    it("rebuilds the base image when its Dockerfile hash changed", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({
+                    stdout: JSON.stringify({
+                        [BASE_IMAGE_LABEL]: "stale-hash",
+                    }),
+                }),
+            )
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
+
+        await agent.prepareImage();
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            2,
+            "docker",
+            [
+                "build",
+                "-t",
+                DEFAULT_IMAGE,
+                "-f",
+                DEFAULT_DOCKERFILE,
+                "--label",
+                `${BASE_IMAGE_LABEL}=${hash}`,
                 path.dirname(DEFAULT_DOCKERFILE),
             ],
             expect.anything(),
@@ -263,7 +316,9 @@ describe("createDockerAgent", () => {
                 "--pids-limit",
                 DEFAULT_PIDS_LIMIT,
                 "--user",
-                "node",
+                sandboxRunUser(),
+                "-e",
+                "HOME=/tmp",
                 "-w",
                 worktree,
                 "-v",
@@ -603,7 +658,7 @@ describe("watchSandboxLogs", () => {
         expect(mockedChildProcess).toHaveBeenNthCalledWith(1, "docker", [
             "ps",
             "--filter",
-            "name=afk-issue-14-",
+            "name=afk-issue-14",
             "--format",
             "{{.Names}}",
         ]);
@@ -617,6 +672,45 @@ describe("watchSandboxLogs", () => {
             ["logs", "--follow", "afk-issue-14-add-slug"],
             expect.objectContaining({ onOutput: expect.any(Function) }),
         );
+    });
+
+    it("follows the logs of a Sandbox whose Task ID has no slug", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result({ stdout: "afk-issue-23\n" }))
+            .mockResolvedValueOnce(inspection())
+            .mockResolvedValueOnce(result());
+
+        await watchSandboxLogs("/repo", 23);
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(1, "docker", [
+            "ps",
+            "--filter",
+            "name=afk-issue-23",
+            "--format",
+            "{{.Names}}",
+        ]);
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(2, "docker", [
+            "inspect",
+            "afk-issue-23",
+        ]);
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            3,
+            "docker",
+            ["logs", "--follow", "afk-issue-23"],
+            expect.objectContaining({ onOutput: expect.any(Function) }),
+        );
+    });
+
+    it("does not match a Sandbox whose issue number starts with the same digits", async () => {
+        mockedChildProcess.mockResolvedValueOnce(
+            result({ stdout: "afk-issue-23\n" }),
+        );
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 2 }),
+        ).rejects.toThrow("No running agent for issue 2 in /repo");
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
     });
 
     it("does not match a Sandbox for a longer issue number", async () => {

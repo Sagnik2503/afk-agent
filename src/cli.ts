@@ -71,8 +71,11 @@ const parseMemory = argumentParser(parseMemoryLimit);
 const parseCpus = argumentParser(parseCpusLimit);
 const parsePids = argumentParser(parsePidsLimit);
 
-async function reportPreflight(repoPath: string): Promise<boolean> {
-    const failures = await runPreflight({ repoPath });
+async function reportPreflight(
+    repoPath: string,
+    requireValidationConfig = true,
+): Promise<boolean> {
+    const failures = await runPreflight({ repoPath, requireValidationConfig });
 
     if (failures.length > 0) {
         console.error(formatPreflightFailures(failures));
@@ -100,7 +103,6 @@ type RunOptions = {
     memory?: string;
     cpus?: string;
     pidsLimit?: string;
-    testCommand?: string;
     image?: string;
     push?: boolean;
     pr?: boolean;
@@ -124,9 +126,6 @@ function backgroundChildArgs(options: RunOptions): string[] {
     }
     if (options.pidsLimit !== undefined) {
         args.push("--pids-limit", options.pidsLimit);
-    }
-    if (options.testCommand !== undefined) {
-        args.push("--test-command", options.testCommand);
     }
     if (options.image !== undefined) {
         args.push("--image", options.image);
@@ -283,7 +282,7 @@ program
     .argument("[path]", "repository path", ".")
     .action(async (repoPath: string) => {
         try {
-            if (!(await reportPreflight(repoPath))) {
+            if (!(await reportPreflight(repoPath, false))) {
                 return;
             }
 
@@ -321,10 +320,6 @@ program
         "--pids-limit <count>",
         `Sandbox process limit (default: ${DEFAULT_PIDS_LIMIT})`,
         parsePids,
-    )
-    .option(
-        "--test-command <command>",
-        "Command used to validate changes (default: npm test)",
     )
     .option(
         "--image <image>",
@@ -472,9 +467,6 @@ async function executeRun(
                 ...(options.cpus !== undefined ? { cpus: options.cpus } : {}),
                 ...(options.pidsLimit !== undefined
                     ? { pidsLimit: options.pidsLimit }
-                    : {}),
-                ...(options.testCommand !== undefined
-                    ? { testCommand: options.testCommand }
                     : {}),
                 ...(options.image !== undefined
                     ? { imageName: options.image, build: false }

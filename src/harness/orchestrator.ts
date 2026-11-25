@@ -4,6 +4,11 @@ import {
     createDockerAgent,
     type DockerAgentOptions,
 } from "../agent/docker_runner.js";
+import {
+    createSandboxCommandRunner,
+    prepareSandboxImage,
+    projectImageName,
+} from "../agent/sandbox.js";
 import { setupWorktree } from "../worktree/manager.js";
 import {
     buildIssueComment,
@@ -27,7 +32,8 @@ import { disposeWorktree, type DisposeWorktreeInput } from "./dispose.js";
 import { errorMessage } from "../errors.js";
 import type { HarnessReport } from "./report.js";
 import { runWithRetries } from "./retry.js";
-import { runTests } from "./validation.js";
+import { runValidation } from "./validation.js";
+import { loadConfig } from "../config.js";
 
 export type RunPhase = "image" | "sandbox";
 
@@ -48,7 +54,6 @@ export type RunTaskInput = {
     imageName?: string;
     build?: boolean;
     timeout?: number;
-    testCommand?: string;
 };
 
 export type RunTaskDependencies = {
@@ -263,6 +268,11 @@ export async function runTask(
     const repoPath = path.resolve(input.repoPath);
     const taskId = input.taskId ?? randomUUID();
 
+    const config = await loadConfig(repoPath);
+    const validateCommands = config.validate;
+    const projectImage =
+        input.imageName === undefined ? config.dockerfile : null;
+
     const agentOptions: DockerAgentOptions = {
         repoPath,
         taskId,
@@ -289,13 +299,21 @@ export async function runTask(
     if (input.timeout !== undefined) {
         agentOptions.timeout = input.timeout;
     }
+    if (projectImage !== null) {
+        agentOptions.imageName = await projectImageName(projectImage);
+        agentOptions.dockerfilePath = projectImage;
+    }
 
     const agent = createDockerAgent(agentOptions);
+    const validationSandbox = createSandboxCommandRunner(agentOptions);
 
     const { branchName, worktreePath } = await setupWorktree(repoPath, taskId);
 
     try {
         await input.onPhase?.("image");
+        if (projectImage !== null) {
+            await prepareSandboxImage();
+        }
         await agent.prepareImage();
     } catch (error) {
         await disposeAfterFailure(
@@ -328,11 +346,11 @@ export async function runTask(
             },
             {
                 runAgent: (_worktreePath, prompt) => agent.run(prompt),
-                runTests:
-                    input.testCommand === undefined
-                        ? runTests
-                        : (worktreePath: string) =>
-                              runTests(worktreePath, input.testCommand),
+                runValidation: () =>
+                    runValidation(
+                        validationSandbox.runCommand,
+                        validateCommands,
+                    ),
                 getChangedFiles,
             },
         );
