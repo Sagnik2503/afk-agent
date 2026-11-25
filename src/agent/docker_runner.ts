@@ -155,11 +155,12 @@ export async function watchSandboxLogs(
         throw new Error(`Invalid issue number: ${issueNumber}`);
     }
 
-    const prefix = `afk-issue-${issueNumber}-`;
+    const baseName = `afk-issue-${issueNumber}`;
+    const prefix = `${baseName}-`;
     const listed = await ChildProcess("docker", [
         "ps",
         "--filter",
-        `name=${prefix}`,
+        `name=${baseName}`,
         "--format",
         "{{.Names}}",
     ]);
@@ -173,7 +174,11 @@ export async function watchSandboxLogs(
     const candidates = listed.stdout
         .split(/\r?\n/)
         .map((name) => name.trim())
-        .filter((name) => name.length > 0 && name.startsWith(prefix));
+        .filter(
+            (name) =>
+                name.length > 0 &&
+                (name === baseName || name.startsWith(prefix)),
+        );
 
     if (candidates.length === 0) {
         throw new Error(noRunningAgentMessage(repoPath, issueNumber));

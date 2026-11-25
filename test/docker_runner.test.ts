@@ -652,7 +652,7 @@ describe("watchSandboxLogs", () => {
         expect(mockedChildProcess).toHaveBeenNthCalledWith(1, "docker", [
             "ps",
             "--filter",
-            "name=afk-issue-14-",
+            "name=afk-issue-14",
             "--format",
             "{{.Names}}",
         ]);
@@ -666,6 +666,45 @@ describe("watchSandboxLogs", () => {
             ["logs", "--follow", "afk-issue-14-add-slug"],
             expect.objectContaining({ onOutput: expect.any(Function) }),
         );
+    });
+
+    it("follows the logs of a Sandbox whose Task ID has no slug", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(result({ stdout: "afk-issue-23\n" }))
+            .mockResolvedValueOnce(inspection())
+            .mockResolvedValueOnce(result());
+
+        await watchSandboxLogs("/repo", 23);
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(1, "docker", [
+            "ps",
+            "--filter",
+            "name=afk-issue-23",
+            "--format",
+            "{{.Names}}",
+        ]);
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(2, "docker", [
+            "inspect",
+            "afk-issue-23",
+        ]);
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            3,
+            "docker",
+            ["logs", "--follow", "afk-issue-23"],
+            expect.objectContaining({ onOutput: expect.any(Function) }),
+        );
+    });
+
+    it("does not match a Sandbox whose issue number starts with the same digits", async () => {
+        mockedChildProcess.mockResolvedValueOnce(
+            result({ stdout: "afk-issue-23\n" }),
+        );
+
+        await expect(
+            watchSandboxLogs({ repoPath: "/repo", issueNumber: 2 }),
+        ).rejects.toThrow("No running agent for issue 2 in /repo");
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
     });
 
     it("does not match a Sandbox for a longer issue number", async () => {
