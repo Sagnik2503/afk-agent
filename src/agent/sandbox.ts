@@ -37,11 +37,19 @@ const GIT_ENV = [
     "GIT_AUTHOR_EMAIL=afk-agent@localhost",
     "GIT_COMMITTER_NAME=afk-agent",
     "GIT_COMMITTER_EMAIL=afk-agent@localhost",
-    // The bind-mounted worktree is owned by the host user, not the node user.
     "GIT_CONFIG_COUNT=1",
     "GIT_CONFIG_KEY_0=safe.directory",
     "GIT_CONFIG_VALUE_0=*",
 ];
+
+// Run as the host user so the bind-mounted Worktree stays writable even when
+// the host UID does not match the image's `node` user (e.g. Linux CI).
+export function sandboxRunUser(): string {
+    const uid = process.getuid?.();
+    const gid = process.getgid?.();
+
+    return uid === undefined || gid === undefined ? "node" : `${uid}:${gid}`;
+}
 
 export function parseMemoryLimit(value: string): string {
     const normalized = value.trim();
@@ -327,7 +335,9 @@ export function createSandboxCommandRunner(
             "--pids-limit",
             pidsLimit,
             "--user",
-            "node",
+            sandboxRunUser(),
+            "-e",
+            "HOME=/tmp",
             "-w",
             worktreePath,
             "-v",

@@ -16,6 +16,7 @@ import {
     dockerfileHash,
     prepareSandboxImage,
     projectImageName,
+    sandboxRunUser,
 } from "../src/agent/sandbox.js";
 
 vi.mock("../src/process.js", () => ({
@@ -69,7 +70,9 @@ describe("createSandboxCommandRunner", () => {
                 "--pids-limit",
                 DEFAULT_PIDS_LIMIT,
                 "--user",
-                "node",
+                sandboxRunUser(),
+                "-e",
+                "HOME=/tmp",
                 "-w",
                 worktree,
                 "-v",

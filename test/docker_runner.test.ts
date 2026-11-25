@@ -14,7 +14,11 @@ import {
     parsePidsLimit,
     watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
-import { BASE_IMAGE_LABEL, dockerfileHash } from "../src/agent/sandbox.js";
+import {
+    BASE_IMAGE_LABEL,
+    dockerfileHash,
+    sandboxRunUser,
+} from "../src/agent/sandbox.js";
 
 vi.mock("../src/process.js", () => ({
     ChildProcess: vi.fn(),
@@ -312,7 +316,9 @@ describe("createDockerAgent", () => {
                 "--pids-limit",
                 DEFAULT_PIDS_LIMIT,
                 "--user",
-                "node",
+                sandboxRunUser(),
+                "-e",
+                "HOME=/tmp",
                 "-w",
                 worktree,
                 "-v",
