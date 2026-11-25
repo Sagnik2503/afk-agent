@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ProcessResult } from "../src/process.js";
-import type { TestResult } from "../src/harness/validation.js";
+import type { ValidationResult } from "../src/harness/validation.js";
 import { runWithRetries } from "../src/harness/retry.js";
 
 function agentResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
@@ -15,7 +15,9 @@ function agentResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
     };
 }
 
-function testResult(overrides: Partial<TestResult> = {}): TestResult {
+function testResult(
+    overrides: Partial<ValidationResult> = {},
+): ValidationResult {
     return {
         passed: true,
         stdout: "",
@@ -35,7 +37,9 @@ type RunAgentFn = (
 function makeDeps() {
     return {
         runAgent: vi.fn<RunAgentFn>(async () => agentResult()),
-        runTests: vi.fn(async (): Promise<TestResult> => testResult()),
+        runValidation: vi.fn(async (): Promise<ValidationResult> =>
+            testResult(),
+        ),
         getChangedFiles: vi.fn(async (): Promise<string[]> => ["src/a.ts"]),
     };
 }
@@ -56,13 +60,13 @@ describe("runWithRetries", () => {
         expect(reports).toHaveLength(1);
         expect(reports[0]?.success).toBe(true);
         expect(deps.runAgent).toHaveBeenCalledTimes(1);
-        expect(deps.runTests).toHaveBeenCalledTimes(1);
+        expect(deps.runValidation).toHaveBeenCalledTimes(1);
         expect(deps.getChangedFiles).toHaveBeenCalledTimes(1);
     });
 
     it("returns collected reports and the error when tests throw", async () => {
         const deps = makeDeps();
-        deps.runTests
+        deps.runValidation
             .mockResolvedValueOnce(testResult({ passed: false }))
             .mockRejectedValueOnce(new Error("npm exploded"));
 
@@ -75,7 +79,7 @@ describe("runWithRetries", () => {
 
     it("returns collected reports and the error when changed files throw", async () => {
         const deps = makeDeps();
-        deps.runTests.mockResolvedValueOnce(testResult({ passed: false }));
+        deps.runValidation.mockResolvedValueOnce(testResult({ passed: false }));
         deps.getChangedFiles
             .mockResolvedValueOnce(["src/a.ts"])
             .mockRejectedValueOnce(new Error("git exploded"));
@@ -100,13 +104,13 @@ describe("runWithRetries", () => {
         expect(reports).toHaveLength(1);
         expect(reports[0]?.success).toBe(false);
         expect(reports[0]?.reasons).toContain("agent exited with code 1");
-        expect(deps.runTests).toHaveBeenCalledTimes(1);
+        expect(deps.runValidation).toHaveBeenCalledTimes(1);
         expect(deps.getChangedFiles).toHaveBeenCalledTimes(1);
     });
 
     it("announces each attempt as it starts", async () => {
         const deps = makeDeps();
-        deps.runTests.mockResolvedValue(testResult({ passed: false }));
+        deps.runValidation.mockResolvedValue(testResult({ passed: false }));
         const seen: number[] = [];
 
         await runWithRetries(
@@ -157,12 +161,12 @@ describe("runWithRetries", () => {
         expect(reports).toHaveLength(1);
         expect(reports[0]?.agentTimedOut).toBe(true);
         expect(reports[0]?.success).toBe(false);
-        expect(deps.runTests).toHaveBeenCalledTimes(1);
+        expect(deps.runValidation).toHaveBeenCalledTimes(1);
     });
 
     it("retries failing tests up to three total attempts", async () => {
         const deps = makeDeps();
-        deps.runTests.mockResolvedValue(
+        deps.runValidation.mockResolvedValue(
             testResult({ passed: false, stderr: "still failing" }),
         );
 
@@ -171,7 +175,7 @@ describe("runWithRetries", () => {
         expect(reports).toHaveLength(3);
         expect(reports.every((report) => !report.success)).toBe(true);
         expect(deps.runAgent).toHaveBeenCalledTimes(3);
-        expect(deps.runTests).toHaveBeenCalledTimes(3);
+        expect(deps.runValidation).toHaveBeenCalledTimes(3);
         expect(
             deps.runAgent.mock.calls.map(([worktreePath]) => worktreePath),
         ).toEqual([input.worktreePath, input.worktreePath, input.worktreePath]);
@@ -179,7 +183,7 @@ describe("runWithRetries", () => {
 
     it("stops early when a retry passes", async () => {
         const deps = makeDeps();
-        deps.runTests
+        deps.runValidation
             .mockResolvedValueOnce(testResult({ passed: false }))
             .mockResolvedValueOnce(testResult({ passed: true }));
 
@@ -192,7 +196,7 @@ describe("runWithRetries", () => {
 
     it("retries when tests time out", async () => {
         const deps = makeDeps();
-        deps.runTests.mockResolvedValue(
+        deps.runValidation.mockResolvedValue(
             testResult({ passed: false, timedOut: true }),
         );
 
@@ -203,7 +207,7 @@ describe("runWithRetries", () => {
 
     it("adds the previous test failure and changed files to the retry prompt", async () => {
         const deps = makeDeps();
-        deps.runTests
+        deps.runValidation
             .mockResolvedValueOnce(
                 testResult({
                     passed: false,
@@ -225,7 +229,7 @@ describe("runWithRetries", () => {
 
     it("labels the failed Validation command in the retry prompt", async () => {
         const deps = makeDeps();
-        deps.runTests
+        deps.runValidation
             .mockResolvedValueOnce(
                 testResult({
                     passed: false,

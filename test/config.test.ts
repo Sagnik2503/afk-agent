@@ -1,33 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
     loadProjectDockerfile,
     loadValidationCommands,
 } from "../src/config.js";
+import { cleanupRepos, makeRepo as makeFixtureRepo } from "./repo_fixture.js";
 
-const repos: string[] = [];
-
-async function makeRepo(config?: string): Promise<string> {
-    const repo = await mkdtemp(join(tmpdir(), "afk-config-"));
-    repos.push(repo);
-
-    if (config !== undefined) {
-        await mkdir(join(repo, ".afk"), { recursive: true });
-        await writeFile(join(repo, ".afk", "config.json"), config);
-    }
-
-    return repo;
+function makeRepo(config?: string): Promise<string> {
+    return makeFixtureRepo("afk-config-", config);
 }
 
-afterEach(async () => {
-    await Promise.all(
-        repos
-            .splice(0)
-            .map((repo) => rm(repo, { recursive: true, force: true })),
-    );
-});
+afterEach(cleanupRepos);
 
 describe("loadValidationCommands", () => {
     it("reads the ordered validate list from .afk/config.json", async () => {

@@ -14,6 +14,7 @@ import {
     parsePidsLimit,
     watchSandboxLogs,
 } from "../src/agent/docker_runner.js";
+import { BASE_IMAGE_LABEL, dockerfileHash } from "../src/agent/sandbox.js";
 
 vi.mock("../src/process.js", () => ({
     ChildProcess: vi.fn(),
@@ -91,7 +92,14 @@ describe("createDockerAgent", () => {
         );
     });
 
-    it("skips the build when the image already exists", async () => {
+    it("skips the build when the image already exists with the current base hash", async () => {
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
+        mockedChildProcess.mockResolvedValueOnce(
+            result({
+                stdout: JSON.stringify({ [BASE_IMAGE_LABEL]: hash }),
+            }),
+        );
+
         const agent = createDockerAgent(options);
 
         await agent.prepareImage();
@@ -99,7 +107,13 @@ describe("createDockerAgent", () => {
         expect(mockedChildProcess).toHaveBeenCalledTimes(1);
         expect(mockedChildProcess).toHaveBeenCalledWith(
             "docker",
-            ["image", "inspect", DEFAULT_IMAGE],
+            [
+                "image",
+                "inspect",
+                "--format",
+                "{{json .Config.Labels}}",
+                DEFAULT_IMAGE,
+            ],
             expect.anything(),
         );
     });
@@ -112,6 +126,7 @@ describe("createDockerAgent", () => {
             .mockResolvedValueOnce(result());
 
         const agent = createDockerAgent(options);
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
 
         await agent.prepareImage();
 
@@ -124,6 +139,41 @@ describe("createDockerAgent", () => {
                 DEFAULT_IMAGE,
                 "-f",
                 DEFAULT_DOCKERFILE,
+                "--label",
+                `${BASE_IMAGE_LABEL}=${hash}`,
+                path.dirname(DEFAULT_DOCKERFILE),
+            ],
+            expect.anything(),
+        );
+    });
+
+    it("rebuilds the base image when its Dockerfile hash changed", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({
+                    stdout: JSON.stringify({
+                        [BASE_IMAGE_LABEL]: "stale-hash",
+                    }),
+                }),
+            )
+            .mockResolvedValueOnce(result());
+
+        const agent = createDockerAgent(options);
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
+
+        await agent.prepareImage();
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            2,
+            "docker",
+            [
+                "build",
+                "-t",
+                DEFAULT_IMAGE,
+                "-f",
+                DEFAULT_DOCKERFILE,
+                "--label",
+                `${BASE_IMAGE_LABEL}=${hash}`,
                 path.dirname(DEFAULT_DOCKERFILE),
             ],
             expect.anything(),

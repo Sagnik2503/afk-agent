@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ProcessResult } from "../src/process.js";
 import {
     formatPreflightFailures,
     runPreflight,
     type PreflightRun,
 } from "../src/preflight.js";
+import { cleanupRepos, makeRepo as makeFixtureRepo } from "./repo_fixture.js";
 
 function result(
     exitCode = 0,
@@ -28,29 +26,13 @@ function passingRun(): PreflightRun {
     return vi.fn(async () => result());
 }
 
-const repos: string[] = [];
-
-async function makeRepo(config?: string): Promise<string> {
-    const repo = await mkdtemp(join(tmpdir(), "afk-preflight-"));
-    repos.push(repo);
-
-    if (config !== undefined) {
-        await mkdir(join(repo, ".afk"), { recursive: true });
-        await writeFile(join(repo, ".afk", "config.json"), config);
-    }
-
-    return repo;
+function makeRepo(config?: string): Promise<string> {
+    return makeFixtureRepo("afk-preflight-", config);
 }
 
 const configured = '{"validate":[]}';
 
-afterEach(async () => {
-    await Promise.all(
-        repos
-            .splice(0)
-            .map((repo) => rm(repo, { recursive: true, force: true })),
-    );
-});
+afterEach(cleanupRepos);
 
 describe("runPreflight", () => {
     it("returns no failures when every check passes", async () => {
@@ -190,6 +172,18 @@ describe("runPreflight", () => {
                 guidance: expect.stringContaining("Dockerfile"),
             }),
         ]);
+    });
+
+    it("skips the Validation config check when it is not required (setup)", async () => {
+        const repoPath = await makeRepo();
+
+        await expect(
+            runPreflight({
+                repoPath,
+                run: passingRun(),
+                requireValidationConfig: false,
+            }),
+        ).resolves.toEqual([]);
     });
 
     it("accepts an empty validate list as a deliberate opt-out", async () => {

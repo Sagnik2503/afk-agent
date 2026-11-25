@@ -12,10 +12,7 @@ import {
 } from "../src/agent/sandbox.js";
 import { runWithRetries } from "../src/harness/retry.js";
 import { getChangedFiles } from "../src/harness/change.js";
-import {
-    loadProjectDockerfile,
-    loadValidationCommands,
-} from "../src/config.js";
+import { loadConfig } from "../src/config.js";
 import { runTask } from "../src/harness/orchestrator.js";
 import {
     buildIssueComment,
@@ -63,8 +60,7 @@ vi.mock("../src/agent/sandbox.js", () => ({
 }));
 
 vi.mock("../src/config.js", () => ({
-    loadValidationCommands: vi.fn(),
-    loadProjectDockerfile: vi.fn(),
+    loadConfig: vi.fn(),
 }));
 
 vi.mock("../src/harness/retry.js", () => ({
@@ -77,8 +73,7 @@ const mockedCreateDockerAgent = vi.mocked(createDockerAgent);
 const mockedCreateSandboxCommandRunner = vi.mocked(createSandboxCommandRunner);
 const mockedPrepareSandboxImage = vi.mocked(prepareSandboxImage);
 const mockedProjectImageName = vi.mocked(projectImageName);
-const mockedLoadValidationCommands = vi.mocked(loadValidationCommands);
-const mockedLoadProjectDockerfile = vi.mocked(loadProjectDockerfile);
+const mockedLoadConfig = vi.mocked(loadConfig);
 const mockedRunWithRetries = vi.mocked(runWithRetries);
 const mockedBuildIssueComment = vi.mocked(buildIssueComment);
 const mockedCommitLeftovers = vi.mocked(commitLeftovers);
@@ -168,8 +163,7 @@ beforeEach(() => {
     mockedCreateSandboxCommandRunner.mockReset();
     mockedPrepareSandboxImage.mockReset();
     mockedProjectImageName.mockReset();
-    mockedLoadValidationCommands.mockReset();
-    mockedLoadProjectDockerfile.mockReset();
+    mockedLoadConfig.mockReset();
     mockedRunWithRetries.mockReset();
     agent.prepareImage.mockReset();
     agent.run.mockReset();
@@ -193,8 +187,10 @@ beforeEach(() => {
     mockedCreateSandboxCommandRunner.mockReturnValue(sandboxRunner);
     mockedPrepareSandboxImage.mockResolvedValue(undefined);
     mockedProjectImageName.mockResolvedValue("afk-agent:project-test");
-    mockedLoadValidationCommands.mockResolvedValue(["npm test"]);
-    mockedLoadProjectDockerfile.mockResolvedValue(null);
+    mockedLoadConfig.mockResolvedValue({
+        validate: ["npm test"],
+        dockerfile: null,
+    });
     mockedSetupWorktree.mockResolvedValue({ branchName, worktreePath });
     mockedRemoveWorktree.mockResolvedValue(undefined);
     mockedRunWithRetries.mockResolvedValue({ reports: [], error: null });
@@ -361,7 +357,7 @@ describe("runTask", () => {
 
         expect(deps?.getChangedFiles).toBe(getChangedFiles);
 
-        const result = await deps?.runTests(worktreePath);
+        const result = await deps?.runValidation(worktreePath);
 
         expect(sandboxRunner.runCommand).toHaveBeenCalledWith(
             ["sh", "-c", "npm test"],
@@ -371,16 +367,19 @@ describe("runTask", () => {
     });
 
     it("validates with the commands from the repository config", async () => {
-        mockedLoadValidationCommands.mockResolvedValue(["make check"]);
+        mockedLoadConfig.mockResolvedValue({
+            validate: ["make check"],
+            dockerfile: null,
+        });
         sandboxRunner.runCommand.mockResolvedValue(
             processResult({ stdout: "custom-check" }),
         );
 
         await runTask(input);
 
-        expect(mockedLoadValidationCommands).toHaveBeenCalledWith("/repo");
+        expect(mockedLoadConfig).toHaveBeenCalledWith("/repo");
         const deps = mockedRunWithRetries.mock.calls[0]?.[1];
-        const result = await deps?.runTests(worktreePath);
+        const result = await deps?.runValidation(worktreePath);
 
         expect(sandboxRunner.runCommand).toHaveBeenCalledWith(
             ["sh", "-c", "make check"],
@@ -391,7 +390,10 @@ describe("runTask", () => {
     });
 
     it("uses the Project image for the agent and Validation when the repo defines a Dockerfile", async () => {
-        mockedLoadProjectDockerfile.mockResolvedValue("/repo/.afk/Dockerfile");
+        mockedLoadConfig.mockResolvedValue({
+            validate: ["npm test"],
+            dockerfile: "/repo/.afk/Dockerfile",
+        });
         mockedProjectImageName.mockResolvedValue("afk-agent:project-abc123");
 
         await runTask(input);
@@ -411,7 +413,10 @@ describe("runTask", () => {
     });
 
     it("prepares the base image before the Project image", async () => {
-        mockedLoadProjectDockerfile.mockResolvedValue("/repo/.afk/Dockerfile");
+        mockedLoadConfig.mockResolvedValue({
+            validate: ["npm test"],
+            dockerfile: "/repo/.afk/Dockerfile",
+        });
 
         await runTask(input);
 
@@ -436,7 +441,10 @@ describe("runTask", () => {
     });
 
     it("prefers an explicit image override over the repo Dockerfile", async () => {
-        mockedLoadProjectDockerfile.mockResolvedValue("/repo/.afk/Dockerfile");
+        mockedLoadConfig.mockResolvedValue({
+            validate: ["npm test"],
+            dockerfile: "/repo/.afk/Dockerfile",
+        });
 
         await runTask({ ...input, imageName: "custom:1" });
 
@@ -451,7 +459,7 @@ describe("runTask", () => {
     });
 
     it("refuses the run before Docker or the worktree when config is missing", async () => {
-        mockedLoadValidationCommands.mockRejectedValue(
+        mockedLoadConfig.mockRejectedValue(
             new Error('Missing /repo/.afk/config.json. Add a "validate" list.'),
         );
 

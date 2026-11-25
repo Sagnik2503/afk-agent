@@ -1,6 +1,6 @@
 import type { ProcessResult } from "../process.js";
 import { getExecutionStatus, type ExecutionStatus } from "./result.js";
-import type { TestResult } from "./validation.js";
+import type { ValidationResult } from "./validation.js";
 
 export type HarnessReport = {
     taskId: string;
@@ -17,13 +17,13 @@ export type HarnessReport = {
         signal: NodeJS.Signals | null;
         outputTruncated: boolean;
     };
-    tests: TestResult;
+    tests: ValidationResult;
 };
 
 export type ReportInput = {
     taskId: string;
     agentResult: ProcessResult;
-    testResult: TestResult;
+    testResult: ValidationResult;
     changedFiles: string[];
 };
 

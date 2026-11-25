@@ -1,13 +1,13 @@
 import type { ProcessResult } from "../process.js";
 import { errorMessage } from "../errors.js";
 import { buildReport, type HarnessReport } from "./report.js";
-import type { TestResult } from "./validation.js";
+import type { ValidationResult } from "./validation.js";
 
 export const MAX_ATTEMPTS = 3;
 
 export type RetryDependencies = {
     runAgent: (worktreePath: string, prompt: string) => Promise<ProcessResult>;
-    runTests: (worktreePath: string) => Promise<TestResult>;
+    runValidation: (worktreePath: string) => Promise<ValidationResult>;
     getChangedFiles: (worktreePath: string) => Promise<string[]>;
 };
 
@@ -25,7 +25,7 @@ export type RetryResult = {
 
 function buildRetryPrompt(
     prompt: string,
-    testResult: TestResult,
+    testResult: ValidationResult,
     changedFiles: string[],
 ): string {
     return [
@@ -59,10 +59,10 @@ export async function runWithRetries(
         // Agent launch errors propagate to the caller.
         const agentResult = await deps.runAgent(input.worktreePath, prompt);
 
-        let testResult: TestResult;
+        let testResult: ValidationResult;
 
         try {
-            testResult = await deps.runTests(input.worktreePath);
+            testResult = await deps.runValidation(input.worktreePath);
         } catch (error) {
             return { reports, error: errorMessage(error) };
         }

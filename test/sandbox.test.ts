@@ -2,14 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import path from "node:path";
 import type { ProcessResult } from "../src/process.js";
 import { ChildProcess } from "../src/process.js";
 import {
+    BASE_IMAGE_LABEL,
     createSandboxCommandRunner,
     DEFAULT_CPUS,
+    DEFAULT_DOCKERFILE,
     DEFAULT_IMAGE,
     DEFAULT_MEMORY,
     DEFAULT_PIDS_LIMIT,
+    dockerfileHash,
+    prepareSandboxImage,
     projectImageName,
 } from "../src/agent/sandbox.js";
 
@@ -220,6 +225,80 @@ describe("createSandboxCommandRunner", () => {
             timeout: 120_000,
             env: {},
         });
+    });
+});
+
+describe("prepareSandboxImage", () => {
+    it("builds the base image with a content-hash label when it is missing", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({ exitCode: 1, stderr: "No such image" }),
+            )
+            .mockResolvedValueOnce(result());
+
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
+
+        await prepareSandboxImage();
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            2,
+            "docker",
+            [
+                "build",
+                "-t",
+                DEFAULT_IMAGE,
+                "-f",
+                DEFAULT_DOCKERFILE,
+                "--label",
+                `${BASE_IMAGE_LABEL}=${hash}`,
+                path.dirname(DEFAULT_DOCKERFILE),
+            ],
+            expect.anything(),
+        );
+    });
+
+    it("skips the build when the cached hash matches the Dockerfile", async () => {
+        const hash = await dockerfileHash(DEFAULT_DOCKERFILE);
+        mockedChildProcess.mockResolvedValueOnce(
+            result({ stdout: JSON.stringify({ [BASE_IMAGE_LABEL]: hash }) }),
+        );
+
+        await prepareSandboxImage();
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("rebuilds the base image when the cached hash is stale", async () => {
+        mockedChildProcess
+            .mockResolvedValueOnce(
+                result({
+                    stdout: JSON.stringify({ [BASE_IMAGE_LABEL]: "stale" }),
+                }),
+            )
+            .mockResolvedValueOnce(result());
+
+        await prepareSandboxImage();
+
+        expect(mockedChildProcess).toHaveBeenNthCalledWith(
+            2,
+            "docker",
+            expect.arrayContaining(["build", "--label"]),
+            expect.anything(),
+        );
+    });
+
+    it("does not rebuild a non-base image that already exists", async () => {
+        await prepareSandboxImage({
+            imageName: "afk-agent:project-abc",
+            dockerfilePath: "/repo/.afk/Dockerfile",
+        });
+
+        expect(mockedChildProcess).toHaveBeenCalledTimes(1);
+        expect(mockedChildProcess).toHaveBeenCalledWith(
+            "docker",
+            ["image", "inspect", "afk-agent:project-abc"],
+            expect.anything(),
+        );
     });
 });
 

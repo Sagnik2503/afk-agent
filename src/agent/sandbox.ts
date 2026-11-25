@@ -167,35 +167,83 @@ export async function prepareSandboxImage(
     const dockerfilePath = options.dockerfilePath ?? DEFAULT_DOCKERFILE;
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const buildContext = path.dirname(dockerfilePath);
+    // Only afk's own base image is rebuilt when its bundled Dockerfile changes.
+    // Project images hash their Dockerfile into the tag, and a prebuilt --image
+    // (build: false) never reaches here.
+    const tracksDockerfile =
+        imageName === DEFAULT_IMAGE && dockerfilePath === DEFAULT_DOCKERFILE;
+    const contentHash = tracksDockerfile
+        ? await dockerfileHash(dockerfilePath)
+        : null;
 
     const inspected = await ChildProcess(
         "docker",
-        ["image", "inspect", imageName],
+        tracksDockerfile
+            ? [
+                  "image",
+                  "inspect",
+                  "--format",
+                  "{{json .Config.Labels}}",
+                  imageName,
+              ]
+            : ["image", "inspect", imageName],
         { timeout },
     );
 
     if (inspected.exitCode === 0) {
-        return;
+        if (!tracksDockerfile) {
+            return;
+        }
+
+        // A cached base from an older afk build lacks the current Dockerfile
+        // hash, so upgrades flow through without users editing FROM lines.
+        if (imageLabel(inspected.stdout, BASE_IMAGE_LABEL) === contentHash) {
+            return;
+        }
+    } else {
+        if (inspected.timedOut) {
+            throw new Error(
+                `Docker image inspection timed out: ${inspected.stderr}`,
+            );
+        }
+
+        if (!inspected.stderr.includes("No such image")) {
+            throw new Error(
+                `Docker image inspection failed: ${inspected.stderr}`,
+            );
+        }
     }
 
-    if (inspected.timedOut) {
-        throw new Error(
-            `Docker image inspection timed out: ${inspected.stderr}`,
-        );
+    const buildArgs = ["build", "-t", imageName, "-f", dockerfilePath];
+
+    if (contentHash !== null) {
+        buildArgs.push("--label", `${BASE_IMAGE_LABEL}=${contentHash}`);
     }
 
-    if (!inspected.stderr.includes("No such image")) {
-        throw new Error(`Docker image inspection failed: ${inspected.stderr}`);
-    }
+    buildArgs.push(buildContext);
 
-    const build = await ChildProcess(
-        "docker",
-        ["build", "-t", imageName, "-f", dockerfilePath, buildContext],
-        { timeout },
-    );
+    const build = await ChildProcess("docker", buildArgs, { timeout });
 
     if (build.timedOut || build.exitCode !== 0) {
         throw new Error(`Docker image build failed: ${build.stderr}`);
+    }
+}
+
+export const BASE_IMAGE_LABEL = "afk.base.dockerfile-hash";
+
+export async function dockerfileHash(dockerfilePath: string): Promise<string> {
+    const content = await readFile(dockerfilePath);
+
+    return createHash("sha256").update(content).digest("hex").slice(0, 12);
+}
+
+function imageLabel(stdout: string, label: string): string | undefined {
+    try {
+        const labels = JSON.parse(stdout) as Record<string, string> | null;
+
+        return labels?.[label];
+    } catch {
+        return undefined;
     }
 }
 

@@ -4,7 +4,7 @@ import {
     type ProcessOptions,
     type ProcessResult,
 } from "./process.js";
-import { loadProjectDockerfile, loadValidationCommands } from "./config.js";
+import { loadConfig } from "./config.js";
 import { errorMessage } from "./errors.js";
 
 export type PreflightRun = (
@@ -21,6 +21,7 @@ export type PreflightFailure = {
 export type PreflightInput = {
     repoPath: string;
     run?: PreflightRun;
+    requireValidationConfig?: boolean;
 };
 
 async function passes(
@@ -79,14 +80,15 @@ export async function runPreflight(
         });
     }
 
-    try {
-        await loadValidationCommands(repoPath);
-        await loadProjectDockerfile(repoPath);
-    } catch (error) {
-        failures.push({
-            check: "Validation config",
-            guidance: errorMessage(error),
-        });
+    if (input.requireValidationConfig ?? true) {
+        try {
+            await loadConfig(repoPath);
+        } catch (error) {
+            failures.push({
+                check: "Validation config",
+                guidance: errorMessage(error),
+            });
+        }
     }
 
     return failures;

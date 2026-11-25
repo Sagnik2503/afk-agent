@@ -1,9 +1,17 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
-async function readConfig(
-    repoPath: string,
-): Promise<{ config: unknown; configPath: string }> {
+export type AfkConfig = {
+    validate: string[];
+    dockerfile: string | null;
+};
+
+type RawConfig = {
+    config: unknown;
+    configPath: string;
+};
+
+async function readConfig(repoPath: string): Promise<RawConfig> {
     const configPath = path.join(repoPath, ".afk", "config.json");
     let content: string;
 
@@ -28,53 +36,50 @@ async function readConfig(
     return { config, configPath };
 }
 
-export async function loadValidationCommands(
-    repoPath: string,
-): Promise<string[]> {
-    const { config, configPath } = await readConfig(repoPath);
+function asObject({ config }: RawConfig): Record<string, unknown> | null {
+    return typeof config === "object" && config !== null
+        ? (config as Record<string, unknown>)
+        : null;
+}
 
-    if (
-        typeof config !== "object" ||
-        config === null ||
-        !("validate" in config)
-    ) {
+function parseValidate(raw: RawConfig): string[] {
+    const config = asObject(raw);
+
+    if (config === null || !("validate" in config)) {
         throw new Error(
-            `Missing "validate" key in ${configPath}. Add an ordered list of commands, e.g. { "validate": ["npm test"] }, or { "validate": [] } to run with no Validation.`,
+            `Missing "validate" key in ${raw.configPath}. Add an ordered list of commands, e.g. { "validate": ["npm test"] }, or { "validate": [] } to run with no Validation.`,
         );
     }
 
-    const validate = config.validate;
+    const validate = config["validate"];
 
     if (
         !Array.isArray(validate) ||
         validate.some((command: unknown) => typeof command !== "string")
     ) {
         throw new Error(
-            `"validate" in ${configPath} must be an array of command strings, e.g. { "validate": ["npm test"] }.`,
+            `"validate" in ${raw.configPath} must be an array of command strings, e.g. { "validate": ["npm test"] }.`,
         );
     }
 
     return validate;
 }
 
-export async function loadProjectDockerfile(
+async function parseDockerfile(
+    raw: RawConfig,
     repoPath: string,
 ): Promise<string | null> {
-    const { config, configPath } = await readConfig(repoPath);
+    const config = asObject(raw);
 
-    if (
-        typeof config !== "object" ||
-        config === null ||
-        !("dockerfile" in config)
-    ) {
+    if (config === null || !("dockerfile" in config)) {
         return null;
     }
 
-    const dockerfile = config.dockerfile;
+    const dockerfile = config["dockerfile"];
 
     if (typeof dockerfile !== "string" || dockerfile.trim() === "") {
         throw new Error(
-            `"dockerfile" in ${configPath} must be a non-empty path string, e.g. { "dockerfile": ".afk/Dockerfile" }.`,
+            `"dockerfile" in ${raw.configPath} must be a non-empty path string, e.g. { "dockerfile": ".afk/Dockerfile" }.`,
         );
     }
 
@@ -84,9 +89,30 @@ export async function loadProjectDockerfile(
         await access(dockerfilePath);
     } catch {
         throw new Error(
-            `Dockerfile ${dockerfilePath} (from "dockerfile" in ${configPath}) does not exist. Create it extending FROM afk-agent:base, or remove the "dockerfile" key to use the Sandbox image.`,
+            `Dockerfile ${dockerfilePath} (from "dockerfile" in ${raw.configPath}) does not exist. Create it extending FROM afk-agent:base, or remove the "dockerfile" key to use the Sandbox image.`,
         );
     }
 
     return dockerfilePath;
+}
+
+export async function loadConfig(repoPath: string): Promise<AfkConfig> {
+    const raw = await readConfig(repoPath);
+
+    return {
+        validate: parseValidate(raw),
+        dockerfile: await parseDockerfile(raw, repoPath),
+    };
+}
+
+export async function loadValidationCommands(
+    repoPath: string,
+): Promise<string[]> {
+    return parseValidate(await readConfig(repoPath));
+}
+
+export async function loadProjectDockerfile(
+    repoPath: string,
+): Promise<string | null> {
+    return parseDockerfile(await readConfig(repoPath), repoPath);
 }

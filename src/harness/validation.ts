@@ -1,6 +1,6 @@
 import type { SandboxCommandRunner } from "../agent/sandbox.js";
 
-export type TestResult = {
+export type ValidationResult = {
     passed: boolean;
     stdout: string;
     stderr: string;
@@ -9,10 +9,10 @@ export type TestResult = {
     failedCommand: string | null;
 };
 
-export async function runTests(
+export async function runValidation(
     runCommand: SandboxCommandRunner["runCommand"],
     commands: string[],
-): Promise<TestResult> {
+): Promise<ValidationResult> {
     let stdout = "";
     let stderr = "";
     let timedOut = false;

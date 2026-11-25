@@ -32,8 +32,8 @@ import { disposeWorktree, type DisposeWorktreeInput } from "./dispose.js";
 import { errorMessage } from "../errors.js";
 import type { HarnessReport } from "./report.js";
 import { runWithRetries } from "./retry.js";
-import { runTests } from "./validation.js";
-import { loadProjectDockerfile, loadValidationCommands } from "../config.js";
+import { runValidation } from "./validation.js";
+import { loadConfig } from "../config.js";
 
 export type RunPhase = "image" | "sandbox";
 
@@ -268,11 +268,10 @@ export async function runTask(
     const repoPath = path.resolve(input.repoPath);
     const taskId = input.taskId ?? randomUUID();
 
-    const validateCommands = await loadValidationCommands(repoPath);
+    const config = await loadConfig(repoPath);
+    const validateCommands = config.validate;
     const projectImage =
-        input.imageName === undefined
-            ? await loadProjectDockerfile(repoPath)
-            : null;
+        input.imageName === undefined ? config.dockerfile : null;
 
     const agentOptions: DockerAgentOptions = {
         repoPath,
@@ -347,8 +346,11 @@ export async function runTask(
             },
             {
                 runAgent: (_worktreePath, prompt) => agent.run(prompt),
-                runTests: () =>
-                    runTests(validationSandbox.runCommand, validateCommands),
+                runValidation: () =>
+                    runValidation(
+                        validationSandbox.runCommand,
+                        validateCommands,
+                    ),
                 getChangedFiles,
             },
         );

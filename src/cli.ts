@@ -71,8 +71,11 @@ const parseMemory = argumentParser(parseMemoryLimit);
 const parseCpus = argumentParser(parseCpusLimit);
 const parsePids = argumentParser(parsePidsLimit);
 
-async function reportPreflight(repoPath: string): Promise<boolean> {
-    const failures = await runPreflight({ repoPath });
+async function reportPreflight(
+    repoPath: string,
+    requireValidationConfig = true,
+): Promise<boolean> {
+    const failures = await runPreflight({ repoPath, requireValidationConfig });
 
     if (failures.length > 0) {
         console.error(formatPreflightFailures(failures));
@@ -279,7 +282,7 @@ program
     .argument("[path]", "repository path", ".")
     .action(async (repoPath: string) => {
         try {
-            if (!(await reportPreflight(repoPath))) {
+            if (!(await reportPreflight(repoPath, false))) {
                 return;
             }
 

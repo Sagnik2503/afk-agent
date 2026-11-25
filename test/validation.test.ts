@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ProcessResult } from "../src/process.js";
 import type { SandboxCommandRunner } from "../src/agent/sandbox.js";
-import { runTests } from "../src/harness/validation.js";
+import { runValidation } from "../src/harness/validation.js";
 
 function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
     return {
@@ -22,11 +22,11 @@ beforeEach(() => {
     runCommand.mockResolvedValue(processResult());
 });
 
-describe("runTests", () => {
+describe("runValidation", () => {
     it("runs every Validation command in order inside the Sandbox", async () => {
         runCommand.mockResolvedValue(processResult({ stdout: "passed" }));
 
-        const result = await runTests(runCommand, ["npm ci", "npm test"]);
+        const result = await runValidation(runCommand, ["npm ci", "npm test"]);
 
         expect(runCommand.mock.calls).toEqual([
             [["sh", "-c", "npm ci"], { timeout: 120_000 }],
@@ -46,7 +46,7 @@ describe("runTests", () => {
             }),
         );
 
-        const result = await runTests(runCommand, [
+        const result = await runValidation(runCommand, [
             "npm ci",
             "npm test",
             "npm run lint",
@@ -60,7 +60,7 @@ describe("runTests", () => {
     });
 
     it("runs no checks for an empty Validation list", async () => {
-        const result = await runTests(runCommand, []);
+        const result = await runValidation(runCommand, []);
 
         expect(runCommand).not.toHaveBeenCalled();
         expect(result.passed).toBe(true);
@@ -73,7 +73,7 @@ describe("runTests", () => {
             processResult({ exitCode: null, timedOut: true }),
         );
 
-        const result = await runTests(runCommand, ["npm test"]);
+        const result = await runValidation(runCommand, ["npm test"]);
 
         expect(result.passed).toBe(false);
         expect(result.timedOut).toBe(true);
@@ -85,7 +85,7 @@ describe("runTests", () => {
             processResult({ exitCode: 0, timedOut: true }),
         );
 
-        const result = await runTests(runCommand, ["npm test"]);
+        const result = await runValidation(runCommand, ["npm test"]);
 
         expect(result.passed).toBe(false);
         expect(result.timedOut).toBe(true);
