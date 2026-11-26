@@ -218,7 +218,6 @@ describe("afk run --background", () => {
 
         await waitForChild(repoPath, "issue-5");
 
-        // The child owns the record after spawn: it must write its own outcome.
         const finished = await findRunForIssue(repoPath, 5);
         expect(finished?.state).toBe("failed");
         expect(finished?.error).not.toBeNull();

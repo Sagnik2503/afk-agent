@@ -56,7 +56,6 @@ export async function runWithRetries(
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         await input.onAttempt?.(attempt);
 
-        // Agent launch errors propagate to the caller.
         const agentResult = await deps.runAgent(input.worktreePath, prompt);
 
         let testResult: ValidationResult;
@@ -72,7 +71,6 @@ export async function runWithRetries(
         try {
             changedFiles = await deps.getChangedFiles(input.worktreePath);
         } catch (error) {
-            // Preserve the agent and test results in a report.
             const report = buildReport({
                 taskId: input.taskId,
                 agentResult,

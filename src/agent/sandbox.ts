@@ -42,8 +42,6 @@ const GIT_ENV = [
     "GIT_CONFIG_VALUE_0=*",
 ];
 
-// Run as the host user so the bind-mounted Worktree stays writable even when
-// the host UID does not match the image's `node` user (e.g. Linux CI).
 export function sandboxRunUser(): string {
     const uid = process.getuid?.();
     const gid = process.getgid?.();
@@ -148,7 +146,6 @@ async function detectResourceLimit(
 ): Promise<ResourceLimit | null> {
     const state = await inspectContainerState(containerName);
 
-    // Exit 137 alone is not OOM evidence: timeout SIGKILL and afk stop also produce it.
     if (state?.OOMKilled === true) {
         return {
             kind: "memory",
@@ -175,9 +172,6 @@ export async function prepareSandboxImage(
     const dockerfilePath = options.dockerfilePath ?? DEFAULT_DOCKERFILE;
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const buildContext = path.dirname(dockerfilePath);
-    // Only afk's own base image is rebuilt when its bundled Dockerfile changes.
-    // Project images hash their Dockerfile into the tag, and a prebuilt --image
-    // (build: false) never reaches here.
     const tracksDockerfile =
         imageName === DEFAULT_IMAGE && dockerfilePath === DEFAULT_DOCKERFILE;
     const contentHash = tracksDockerfile
@@ -203,8 +197,6 @@ export async function prepareSandboxImage(
             return;
         }
 
-        // A cached base from an older afk build lacks the current Dockerfile
-        // hash, so upgrades flow through without users editing FROM lines.
         if (imageLabel(inspected.stdout, BASE_IMAGE_LABEL) === contentHash) {
             return;
         }

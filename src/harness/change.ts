@@ -23,7 +23,6 @@ export async function getChangedFiles(worktreePath: string): Promise<string[]> {
             .map(statusPath),
     );
 
-    // Committed work is invisible to `git status`; diff against where the branch diverged.
     const baseRef = await getBaseRef(worktreePath);
     if (baseRef !== null) {
         const diff = await ChildProcess(

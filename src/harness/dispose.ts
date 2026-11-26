@@ -14,8 +14,6 @@ export type DisposeWorktreeResult = {
     error: string | null;
 };
 
-// Commit leftovers (best effort), then force-remove the worktree; the branch
-// survives. See ADR-0001.
 export async function disposeWorktree(
     input: DisposeWorktreeInput,
     deps: { run?: SyncRun } = {},

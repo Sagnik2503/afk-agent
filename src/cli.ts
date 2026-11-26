@@ -148,8 +148,6 @@ function nodeInvocation(): string[] {
 async function startBackgroundRun(options: RunOptions): Promise<void> {
     const repoPath = await validateRepository(options.repo);
     const issueNumber = parseIssueNumber(options.issue);
-    // The Issue fetch happens in the child so the parent returns promptly;
-    // reuse a known Task ID or fall back to the issue number.
     const existing = await findRunForIssue(repoPath, issueNumber);
     const taskId = existing?.taskId ?? `issue-${issueNumber}`;
     const logPath = runLogPath(repoPath, taskId);
@@ -251,7 +249,6 @@ function printOverview(): void {
     printBanner();
     console.log("Commands:");
 
-    // Iterate registered commands so a new command can never be missing here.
     for (const command of program.commands) {
         const name = command.name();
 
@@ -362,7 +359,6 @@ async function executeRun(
         failureRepoPath = repoPath;
         console.log("Repository:", repoPath);
 
-        // 1. Fetch GitHub issue
         printPhase(`Fetching Issue #${options.issue}`);
         const issue = await fetchGitHubIssue(repoPath, options.issue);
         failureIssueNumber = issue.number;
@@ -371,10 +367,8 @@ async function executeRun(
         console.log("Title:", issue.title);
         console.log("URL:", issue.url);
 
-        // 2. Build agent prompt
         const prompt = buildIssuePrompt(issue);
 
-        // 3. Execute task
         const existing = await findRunForIssue(repoPath, issue.number);
         const taskId = backgroundChild
             ? (process.env["AFK_TASK_ID"] ??
@@ -473,7 +467,6 @@ async function executeRun(
                     : {}),
             });
 
-            // 4. Display report
             const report = formatRunReport(result, {
                 pushEnabled: options.push !== false,
                 color: colors,
@@ -573,7 +566,6 @@ async function tailRunLog(
     let offset = 0;
 
     for (;;) {
-        // shortcut: re-reads the whole log each poll; switch to a byte-range read if logs get large.
         const content = await readFile(logPath, "utf8").catch(() => "");
 
         if (content.length > offset) {
