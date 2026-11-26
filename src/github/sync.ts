@@ -248,7 +248,6 @@ export async function pushBranch(
         return refused("refusing to push outside the afk/ namespace", null);
     }
 
-    // config, not `remote get-url`, so url.*.insteadOf rewrites stay local.
     const remote = await run("git", ["config", "--get", "remote.origin.url"], {
         cwd: input.worktreePath,
     });

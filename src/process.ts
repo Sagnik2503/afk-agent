@@ -33,7 +33,7 @@ export function ChildProcess(
     return new Promise((resolve, reject) => {
         const child = spawn(command, args, {
             cwd: options.cwd,
-            stdio: ["ignore", "pipe", "pipe"], //input, output, error
+            stdio: ["ignore", "pipe", "pipe"],
             detached: true,
             ...(options.env ? { env: options.env } : {}),
         });
@@ -45,7 +45,7 @@ export function ChildProcess(
         let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
         let terminating = false;
         let capturedBytes = 0;
-        const maxOutput = options.maxOutput ?? 1024 * 1024; //1MB (default) of shared output storage (stdout + stderr)
+        const maxOutput = options.maxOutput ?? 1024 * 1024;
 
         function terminate(): void {
             if (terminating) return;
@@ -53,13 +53,12 @@ export function ChildProcess(
 
             if (child.pid !== undefined) {
                 try {
-                    process.kill(-child.pid, "SIGTERM"); //process. targets the process grp whereas child. targets the child only
+                    process.kill(-child.pid, "SIGTERM");
                 } catch {
                     child.kill("SIGTERM");
                 }
             }
 
-            //give 5 seconds and kill the process instead of graceful shutdown
             forceKillTimer = setTimeout(() => {
                 if (child.pid === undefined) return;
                 try {
@@ -93,7 +92,6 @@ export function ChildProcess(
 
         child.stdout?.on("data", (data: Buffer) => {
             options.onOutput?.("stdout", data.toString());
-            //data arrives as byte streams
             const remaining = maxOutput - capturedBytes;
             if (remaining <= 0) {
                 outputTruncated = true;

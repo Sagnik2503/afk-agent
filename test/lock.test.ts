@@ -128,8 +128,6 @@ describe("acquireTaskLock", () => {
             }),
         );
 
-        // Pause the first reclaimer's reclaim step until a second acquirer
-        // has taken the lock, reproducing the read-then-reclaim race.
         const fs = await import("node:fs/promises");
         const renameMock = vi.mocked(fs.rename);
         const realRename = renameMock.getMockImplementation()!;

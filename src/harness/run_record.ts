@@ -85,7 +85,6 @@ function newRunRecord(
     };
 }
 
-// A new run for the same task resets the record; in-run updates merge into it.
 export async function startRunRecord(
     input: RunRecordIdentity & { pid: number },
 ): Promise<void> {

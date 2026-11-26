@@ -95,8 +95,6 @@ export async function acquireTaskLock(input: {
                 );
             }
 
-            // Claim the stale lock by renaming it: only one racer can win the
-            // rename, so a live lock created meanwhile is never unlinked.
             const claim = `${file}.stale-${randomUUID()}`;
             try {
                 await rename(file, claim);
@@ -107,14 +105,12 @@ export async function acquireTaskLock(input: {
             const claimed = await readLockFile(claim);
 
             if (claimed !== null && isProcessAlive(claimed.pid)) {
-                // A live lock appeared after our read; put it back and retry.
                 const restored = await link(claim, file)
                     .then(() => true)
                     .catch(() => false);
                 if (restored) {
                     await unlink(claim).catch(() => undefined);
                 }
-                // shortcut: if the path was refilled meanwhile the claim file is orphaned; rare ABA residual.
                 continue;
             }
 
@@ -125,7 +121,6 @@ export async function acquireTaskLock(input: {
     throw new Error(`Unable to acquire lock for task ${input.taskId}`);
 }
 
-// Hand a lock this process holds to a detached child, so the child owns it.
 export async function transferTaskLock(input: {
     repoPath: string;
     taskId: string;

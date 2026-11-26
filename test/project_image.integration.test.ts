@@ -14,8 +14,6 @@ const dockerReady = await ChildProcess("docker", ["info"])
     .then((result) => result.exitCode === 0)
     .catch(() => false);
 
-// A shell-only (non-node) repository whose Project image adds a marker file,
-// so passing Validation proves it ran inside the Project image's Sandbox.
 const validateCommand =
     "test -f /home/node/afk-project-marker && echo validation-ran-in-sandbox";
 

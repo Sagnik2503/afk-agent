@@ -93,8 +93,6 @@ async function disposeStoppedWorktree(input: {
         return null;
     }
 
-    // Cancellation skips GitHub sync (ADR-0001 amendment): commit leftovers
-    // locally and keep the branch, but do not push or comment.
     const { error } = await disposeWorktree({
         repoPath: input.repoPath,
         worktreePath,
